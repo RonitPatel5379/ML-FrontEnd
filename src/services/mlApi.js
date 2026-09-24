@@ -8,7 +8,25 @@ import { API_CONFIG } from "../config/api";
 /**
  * Maps a recommendation object from the Python ML backend to frontend Movie shape
  */
-function mapMlMovie(raw, fallbackId = 0) {
+function mapMlMovie(raw, fallbackId = 0, localMovies = []) {
+  const rawTitle = raw.title || raw.original_title || "Unknown Title";
+  const localMatch = localMovies.find(
+    (m) => m.title?.toLowerCase() === rawTitle.toLowerCase() || String(m.id) === String(raw.id),
+  );
+
+  const similarityText = raw.similarity != null ? `${raw.similarity}% Match` : undefined;
+  const reasonText =
+    raw.similarity != null ? `ML Match: ${raw.similarity}%` : "Backend AI Recommendation";
+
+  if (localMatch) {
+    return {
+      ...localMatch,
+      reason: reasonText,
+      similarity: similarityText,
+      isMlRecommendation: true,
+    };
+  }
+
   const genres =
     typeof raw.genres === "string"
       ? raw.genres.split(",").map((g) => g.trim())
@@ -25,7 +43,7 @@ function mapMlMovie(raw, fallbackId = 0) {
 
   return {
     id: raw.id || fallbackId,
-    title: raw.title || raw.original_title || "Unknown Title",
+    title: rawTitle,
     year,
     rating,
     runtime: raw.runtime || 120,
@@ -33,7 +51,8 @@ function mapMlMovie(raw, fallbackId = 0) {
     overview: raw.overview || "No overview available for this title.",
     remotePoster: raw.poster_path || null,
     popularity: Math.round(raw.popularity || 0),
-    similarity: raw.similarity != null ? `${raw.similarity}% Match` : undefined,
+    similarity: similarityText,
+    reason: reasonText,
     isMlRecommendation: true,
   };
 }
@@ -42,9 +61,10 @@ function mapMlMovie(raw, fallbackId = 0) {
  * Fetches top N machine learning recommendations for a movie title
  * @param {string} movieTitle
  * @param {number} n
+ * @param {Array} localMovies
  * @returns {Promise<Array>}
  */
-export async function fetchMlRecommendations(movieTitle, n = 12) {
+export async function fetchMlRecommendations(movieTitle, n = 12, localMovies = []) {
   if (!movieTitle || typeof movieTitle !== "string") return [];
 
   const controller = new AbortController();
@@ -71,7 +91,7 @@ export async function fetchMlRecommendations(movieTitle, n = 12) {
 
     const data = await response.json();
     if (data?.recommendations && Array.isArray(data.recommendations)) {
-      return data.recommendations.map((item, idx) => mapMlMovie(item, idx + 1));
+      return data.recommendations.map((item, idx) => mapMlMovie(item, idx + 1, localMovies));
     }
     return [];
   } catch (err) {
