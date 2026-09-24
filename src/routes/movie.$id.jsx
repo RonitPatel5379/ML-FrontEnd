@@ -1,14 +1,7 @@
 import { createFileRoute, Link, useParams } from "@tanstack/react-router";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import {
-  Bookmark,
-  BookmarkCheck,
-  Heart,
-  Play,
-  Share2,
-  Star,
-} from "lucide-react";
+import { Bookmark, BookmarkCheck, Heart, Play, Share2, Sparkles, Star } from "lucide-react";
 
 import Poster from "../components/Poster";
 import MovieRow from "../components/MovieRow";
@@ -18,6 +11,7 @@ import { backdropFor } from "../data/backdrops";
 import { useMovies } from "../context/MovieContext";
 import { useUser } from "../context/UserContext";
 import { similarMovies } from "../utils/recommendationEngine";
+import { fetchMlRecommendations } from "../services/mlApi";
 import { formatMoney, formatRuntime } from "../utils/helpers";
 import { toast } from "sonner";
 
@@ -73,6 +67,28 @@ function MovieDetails() {
   const currentProgress = recentEntry?.progress ?? (movie && !isWatched(movie.id) ? 35 : null);
 
   const similar = useMemo(() => similarMovies(movie, movies, 12), [movie, movies]);
+
+  const [mlRecommendations, setMlRecommendations] = useState([]);
+  const [mlLoading, setMlLoading] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    if (movie?.title) {
+      setMlLoading(true);
+      fetchMlRecommendations(movie.title, 12)
+        .then((recs) => {
+          if (active && recs && recs.length > 0) {
+            setMlRecommendations(recs);
+          }
+        })
+        .finally(() => {
+          if (active) setMlLoading(false);
+        });
+    }
+    return () => {
+      active = false;
+    };
+  }, [movie?.title]);
 
   if (loading) return <DetailsSkeleton />;
 
@@ -274,8 +290,32 @@ function MovieDetails() {
         </dl>
       </section>
 
-      <MovieRow title="Similar movies" subtitle="Same wavelength, different story" movies={similar} />
+      {mlRecommendations.length > 0 ? (
+        <>
+          <div className="mx-auto max-w-7xl px-4 pt-4 sm:px-8">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
+              <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+              Machine Learning Powered ({mlRecommendations.length} Recommendations)
+            </span>
+          </div>
+          <MovieRow
+            title="AI Recommended Movies"
+            subtitle="Trained TF-IDF & KMeans clusters from Render ML backend"
+            movies={mlRecommendations}
+          />
+          <MovieRow
+            title="More Similar Titles"
+            subtitle="Content-based genre and popularity similarity"
+            movies={similar}
+          />
+        </>
+      ) : (
+        <MovieRow
+          title="Similar movies"
+          subtitle="Same wavelength, different story"
+          movies={similar}
+        />
+      )}
     </article>
   );
 }
-
