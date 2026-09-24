@@ -15,13 +15,15 @@ export default function SearchOverlay({ open, onClose }) {
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const inputRef = useRef(null);
-  const { movies } = useMovies();
+  const { movies, searchCatalog } = useMovies();
   const { recordSearch, searches } = useUser();
+  const [liveResults, setLiveResults] = useState([]);
 
   useEffect(() => {
     if (open) {
       setQuery("");
       setDebounced("");
+      setLiveResults([]);
       const id = setTimeout(() => inputRef.current?.focus(), 120);
       return () => clearTimeout(id);
     }
@@ -33,7 +35,7 @@ export default function SearchOverlay({ open, onClose }) {
     const id = setTimeout(() => {
       setDebounced(query);
       if (query.trim().length > 1) recordSearch(query);
-    }, 280);
+    }, 240);
     return () => clearTimeout(id);
   }, [query, recordSearch]);
 
@@ -45,10 +47,35 @@ export default function SearchOverlay({ open, onClose }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  const results = useMemo(() => {
-    if (!debounced.trim()) return [];
-    return movies.filter((movie) => matchesQuery(movie, debounced)).slice(0, 8);
-  }, [movies, debounced]);
+  useEffect(() => {
+    let active = true;
+    const q = debounced.trim();
+    if (!q) {
+      setLiveResults([]);
+      return;
+    }
+
+    // 1. Instant local match across loaded catalog
+    const local = movies.filter((movie) => matchesQuery(movie, q)).slice(0, 10);
+    setLiveResults(local);
+
+    // 2. Deep search against complete 69,405 backend dataset
+    if (searchCatalog) {
+      searchCatalog(q).then((deep) => {
+        if (!active || !deep?.length) return;
+        const map = new Map();
+        local.forEach((m) => map.set(String(m.id), m));
+        deep.forEach((m) => map.set(String(m.id), m));
+        setLiveResults(Array.from(map.values()).slice(0, 12));
+      });
+    }
+
+    return () => {
+      active = false;
+    };
+  }, [debounced, movies, searchCatalog]);
+
+  const results = liveResults;
 
   return (
     <AnimatePresence>

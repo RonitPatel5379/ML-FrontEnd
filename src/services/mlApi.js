@@ -160,3 +160,83 @@ export async function checkBackendHealth() {
     clearTimeout(timeoutId);
   }
 }
+
+/**
+ * Fetches full details for a specific movie from the 69,405 backend dataset
+ * @param {string|number} id
+ * @returns {Promise<Object|null>}
+ */
+export async function fetchMlMovieById(id) {
+  if (!id) return null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), API_CONFIG.timeoutMs);
+
+  try {
+    const url = `${API_CONFIG.backendUrl}${API_CONFIG.endpoints.movieById(id)}`;
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) return null;
+    const raw = await response.json();
+    return mapMlMovie(raw);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * Paginated movie catalog from the 69,405 dataset with filters
+ */
+export async function fetchMlCatalog({
+  page = 1,
+  limit = 24,
+  genre = "",
+  sortBy = "popularity",
+  search = "",
+  minRating = 0,
+  language = "",
+} = {}) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), API_CONFIG.timeoutMs);
+
+  try {
+    const url = new URL(`${API_CONFIG.backendUrl}${API_CONFIG.endpoints.movies}`);
+    url.searchParams.set("page", String(page));
+    url.searchParams.set("limit", String(limit));
+    url.searchParams.set("sort_by", sortBy);
+    if (genre) url.searchParams.set("genre", genre);
+    if (search) url.searchParams.set("search", search);
+    if (minRating > 0) url.searchParams.set("min_rating", String(minRating));
+    if (language) url.searchParams.set("language", language);
+
+    const response = await fetch(url.toString(), { signal: controller.signal });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return {
+      total: data.total || 0,
+      page: data.page || page,
+      totalPages: data.total_pages || 1,
+      results: (data.results || []).map((m, idx) => mapMlMovie(m, idx + 1)),
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * Fetches genre counts across the full dataset
+ */
+export async function fetchMlGenres() {
+  try {
+    const url = `${API_CONFIG.backendUrl}${API_CONFIG.endpoints.genres}`;
+    const response = await fetch(url);
+    if (!response.ok) return [];
+    const data = await response.json();
+    return data.genres || [];
+  } catch {
+    return [];
+  }
+}
+

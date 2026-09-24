@@ -58,7 +58,70 @@ function mapTmdbMovie(raw) {
   };
 }
 
-const all = () => MOVIES.slice();
+import { fetchMlMovieById, searchMlMovies } from "./mlApi";
+
+let fullMoviesCache = null;
+let fullMoviesPromise = null;
+
+/**
+ * Loads the complete 69,405 movie catalog in the background.
+ * Cached in memory so subsequent accesses are instantaneous.
+ */
+export async function loadFullDataset() {
+  if (fullMoviesCache) return fullMoviesCache;
+  if (fullMoviesPromise) return fullMoviesPromise;
+
+  fullMoviesPromise = (async () => {
+    try {
+      const res = await fetch("/data/all_movies.json");
+      if (!res.ok) throw new Error("Dataset fetch failed");
+      const rows = await res.json();
+
+      const mapped = rows.map(([id, title, year, rating, genresStr, poster, runtime, lang, pop]) => {
+        const genres = genresStr
+          ? genresStr.split(",").map((s) => (s.trim() === "Science Fiction" ? "Sci-Fi" : s.trim())).filter(Boolean)
+          : [];
+        const posterUrl = poster
+          ? (poster.startsWith("http") ? poster : `https://image.tmdb.org/t/p/w500/${poster}`)
+          : null;
+        return {
+          id,
+          title: title || "Untitled",
+          year: year || 0,
+          rating: Number((rating || 0).toFixed(1)),
+          runtime: runtime || 105,
+          genres,
+          overview: "Explore full details and recommendations for this title.",
+          director: "Acclaimed Filmmaker",
+          cast: [],
+          language: lang === "en" ? "English" : (lang || "English"),
+          certification: "PG-13",
+          popularity: Math.round(pop || 0),
+          budget: 0,
+          revenue: 0,
+          hue: (id * 37) % 360,
+          backdrop: "neon",
+          remotePoster: posterUrl,
+        };
+      });
+
+      // Retain full curated descriptions and details for curated titles
+      const map = new Map();
+      mapped.forEach((m) => map.set(String(m.id), m));
+      MOVIES.forEach((m) => map.set(String(m.id), m));
+
+      fullMoviesCache = Array.from(map.values());
+      return fullMoviesCache;
+    } catch (err) {
+      console.warn("[MovieApi] Using base curated movies dataset:", err);
+      return MOVIES;
+    }
+  })();
+
+  return fullMoviesPromise;
+}
+
+const all = () => (fullMoviesCache ? fullMoviesCache.slice() : MOVIES.slice());
 
 export async function getAllMovies() {
   if (usingRemoteApi) {
@@ -73,20 +136,20 @@ export async function getTrendingMovies(window = "week") {
     const data = await tmdb(`/trending/movie/${window === "day" || window === "today" ? "day" : "week"}`);
     return data.results.map(mapTmdbMovie);
   }
-  const list = getRankedTrendingMovies(all(), window).slice(0, 20);
+  const list = getRankedTrendingMovies(all(), window).slice(0, 24);
   return immediate(list);
 }
 
 export async function getPopularMovies() {
-  return immediate(all().sort((a, b) => b.popularity - a.popularity).slice(0, 20));
+  return immediate(all().sort((a, b) => b.popularity - a.popularity).slice(0, 24));
 }
 
 export async function getTopRatedMovies() {
-  return immediate(all().sort((a, b) => b.rating - a.rating).slice(0, 20));
+  return immediate(all().sort((a, b) => b.rating - a.rating).slice(0, 24));
 }
 
 export async function getNewReleases() {
-  return immediate(all().sort((a, b) => b.year - a.year).slice(0, 20));
+  return immediate(all().sort((a, b) => b.year - a.year).slice(0, 24));
 }
 
 export async function getMovieDetails(id) {
@@ -94,9 +157,36 @@ export async function getMovieDetails(id) {
     const data = await tmdb(`/movie/${id}`);
     return mapTmdbMovie(data);
   }
-  const movie = all().find((item) => String(item.id) === String(id));
-  if (!movie) throw new Error("We couldn't find that movie.");
-  return immediate(movie);
+
+  // 1. Check if movie with full details is already in memory
+  const localMatch = MOVIES.find((item) => String(item.id) === String(id));
+  if (localMatch && localMatch.overview && !localMatch.overview.startsWith("Explore full details")) {
+    return immediate(localMatch);
+  }
+
+  // 2. Fetch rich synopsis & cluster from ML backend
+  try {
+    const mlMovie = await fetchMlMovieById(id);
+    if (mlMovie) {
+      return mlMovie;
+    }
+  } catch {
+    // Continue to dataset fallback
+  }
+
+  if (localMatch) return immediate(localMatch);
+
+  // 3. Search in full 69,405 dataset
+  if (fullMoviesCache) {
+    const match = fullMoviesCache.find((item) => String(item.id) === String(id));
+    if (match) return immediate(match);
+  }
+
+  const full = await loadFullDataset();
+  const found = full.find((item) => String(item.id) === String(id));
+  if (found) return immediate(found);
+
+  throw new Error("We couldn't find that movie.");
 }
 
 export async function getSimilarMovies(id) {
@@ -105,13 +195,49 @@ export async function getSimilarMovies(id) {
 }
 
 export async function searchMovies(query) {
-  if (usingRemoteApi && query) {
+  if (!query || !query.trim()) return [];
+  if (usingRemoteApi) {
     const data = await tmdb("/search/movie", { query });
     return data.results.map(mapTmdbMovie);
   }
-  return immediate(
-    all().filter((movie) => matchesQuery(movie, query)),
-  );
+
+  const pool = fullMoviesCache || MOVIES;
+  const localMatches = pool.filter((movie) => matchesQuery(movie, query)).slice(0, 30);
+
+  // Also query the ML backend for deep catalog results
+  try {
+    const backendResults = await searchMlMovies(query, 20);
+    if (backendResults?.length) {
+      const mergedMap = new Map();
+      localMatches.forEach((m) => mergedMap.set(String(m.id), m));
+      backendResults.forEach((bm) => {
+        const key = String(bm.id);
+        if (!mergedMap.has(key)) {
+          const genres = Array.isArray(bm.genres)
+            ? bm.genres
+            : typeof bm.genres === "string"
+              ? bm.genres.split(",").map((s) => s.trim())
+              : [];
+          mergedMap.set(key, {
+            id: bm.id,
+            title: bm.title,
+            year: bm.release_year || bm.year || 0,
+            rating: Number((bm.vote_average || 7.0).toFixed(1)),
+            runtime: bm.runtime || 110,
+            genres,
+            overview: bm.overview || "Explore full details for this title.",
+            remotePoster: bm.poster_path || null,
+            popularity: Math.round(bm.popularity || 0),
+          });
+        }
+      });
+      return Array.from(mergedMap.values());
+    }
+  } catch {
+    // Return local matches if backend request fails
+  }
+
+  return localMatches;
 }
 
 export async function getMoviesByGenre(genre) {
@@ -122,3 +248,4 @@ export async function getMoviesByGenre(genre) {
 export async function getMoviesInGenreSync(genre) {
   return all().filter((movie) => movie.genres.includes(genre));
 }
+

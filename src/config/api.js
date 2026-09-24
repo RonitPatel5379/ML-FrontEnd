@@ -16,6 +16,10 @@ export const API_CONFIG = {
     health: "/health",
     predict: "/predict",
     search: "/search",
+    movies: "/movies",
+    movieById: (id) => `/movies/${encodeURIComponent(id)}`,
+    genres: "/genres",
+    trending: "/trending",
     welcome: (name) => `/welcome/${encodeURIComponent(name)}`,
   },
 

@@ -35,7 +35,9 @@ export const Route = createFileRoute("/movie/$id")({
 
 function MovieDetails() {
   const { id } = useParams({ from: "/movie/$id" });
-  const { movies, loading, error } = useMovies();
+  const { movies, loading, error, fetchMovieById } = useMovies();
+  const [fetchedMovie, setFetchedMovie] = useState(null);
+  const [fetchingMovie, setFetchingMovie] = useState(false);
   const {
     inWatchlist,
     isFavorite,
@@ -47,10 +49,30 @@ function MovieDetails() {
     updateProgress,
   } = useUser();
 
-  const movie = useMemo(
+  const localMovie = useMemo(
     () => movies.find((item) => String(item.id) === String(id)) || null,
     [movies, id],
   );
+
+  // If movie is not in current in-memory list or lacks synopsis, fetch from full dataset / backend
+  useEffect(() => {
+    let active = true;
+    if (!localMovie || !localMovie.overview || localMovie.overview.startsWith("Explore full details")) {
+      setFetchingMovie(true);
+      fetchMovieById(id)
+        .then((m) => {
+          if (active && m) setFetchedMovie(m);
+        })
+        .finally(() => {
+          if (active) setFetchingMovie(false);
+        });
+    }
+    return () => {
+      active = false;
+    };
+  }, [id, localMovie, fetchMovieById]);
+
+  const movie = localMovie || fetchedMovie;
 
   useEffect(() => {
     // Only track viewing if movie exists and is not already full watched
@@ -90,7 +112,7 @@ function MovieDetails() {
     };
   }, [movie?.title]);
 
-  if (loading) return <DetailsSkeleton />;
+  if (loading || fetchingMovie) return <DetailsSkeleton />;
 
   if (error || !movie) {
     return (

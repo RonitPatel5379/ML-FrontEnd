@@ -215,7 +215,16 @@ const GLOBAL_MOVIES = [
     { hue: 105, backdrop: "gothic", language: "German", certification: "PG-13", budget: 15_000_000, revenue: 53_000_000 }),
 ];
 
-export const MOVIES = [...GLOBAL_MOVIES, ...INDIAN_MOVIES];
+import { CURATED_MOVIES } from "./curatedMovies";
+
+// Merge curated movies from final_movie_daaset.csv with iconic Indian & global collections
+const movieMap = new Map();
+(CURATED_MOVIES || []).forEach((item) => movieMap.set(String(item.id), item));
+(INDIAN_MOVIES || []).forEach((item) => movieMap.set(String(item.id), item));
+(GLOBAL_MOVIES || []).forEach((item) => movieMap.set(String(item.id), item));
+
+export const MOVIES = Array.from(movieMap.values());
 
 export default MOVIES;
+
 
