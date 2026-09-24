@@ -174,11 +174,11 @@ export default function SearchOverlay({ open, onClose }) {
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-semibold">{movie.title}</p>
-                          <p className="truncate text-xs text-muted-foreground">
-                            {movie.year} · {movie.genres.join(", ")}
+                        <p className="truncate text-xs text-muted-foreground">
+                            {movie.year || movie.release_year} · {(Array.isArray(movie.genres) ? movie.genres : []).join(", ")}
                           </p>
                         </div>
-                        <Rating value={movie.rating} />
+                        <Rating value={movie.rating ?? movie.vote_average ?? 0} />
                       </Link>
                     </li>
                   ))}

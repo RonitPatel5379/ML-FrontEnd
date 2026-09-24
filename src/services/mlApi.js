@@ -1,191 +1,123 @@
 /**
  * CineVerse Hub - ML Backend Service
- * Communicates with the FastAPI Recommendation API running on Render
+ * Communicates with the FastAPI Recommendation API running on Render.
+ *
+ * Field mapping (backend → frontend):
+ *   vote_average     → rating
+ *   release_year     → year
+ *   original_language → language
+ *   poster_path      → remotePoster
+ *   genres (string)  → genres (array)
  */
 
 import { API_CONFIG } from "../config/api";
 
+// ─── Normalizer ──────────────────────────────────────────────────────────────
+
 /**
- * Maps a recommendation object from the Python ML backend to frontend Movie shape
+ * Maps a raw backend movie object to the standard frontend Movie shape.
+ * Works for /movies list items, /movies/{id} detail objects, /search results,
+ * and recommendation objects inside /predict responses.
+ *
+ * @param {Object} raw   - Raw object from the backend
+ * @param {number} [idx] - Fallback index used when raw.id is missing
+ * @returns {Object}     - Normalised frontend Movie object
  */
-function mapMlMovie(raw, fallbackId = 0, localMovies = []) {
-  const rawTitle = raw.title || raw.original_title || "Unknown Title";
-  const localMatch = localMovies.find(
-    (m) => m.title?.toLowerCase() === rawTitle.toLowerCase() || String(m.id) === String(raw.id),
-  );
+export function normalizeMlMovie(raw, idx = 0) {
+  if (!raw) return null;
 
-  const similarityText = raw.similarity != null ? `${raw.similarity}% Match` : undefined;
-  const reasonText =
-    raw.similarity != null ? `ML Match: ${raw.similarity}%` : "Backend AI Recommendation";
-
-  if (localMatch) {
-    return {
-      ...localMatch,
-      reason: reasonText,
-      similarity: similarityText,
-      isMlRecommendation: true,
-    };
-  }
-
-  const genres =
+  // ── Genres: backend sends a comma-separated string ──────────────────────
+  const genreArray =
     typeof raw.genres === "string"
-      ? raw.genres.split(",").map((g) => g.trim())
+      ? raw.genres
+          .split(",")
+          .map((g) => g.trim())
+          .filter(Boolean)
+          .map((g) => (g === "Science Fiction" ? "Sci-Fi" : g))
       : Array.isArray(raw.genres)
-        ? raw.genres
+        ? raw.genres.map((g) => (g === "Science Fiction" ? "Sci-Fi" : g))
         : [];
 
+  // ── Year ────────────────────────────────────────────────────────────────
   const year =
     raw.release_year ||
+    raw.year ||
     Number(String(raw.release_date || "").slice(0, 4)) ||
-    new Date().getFullYear();
+    0;
 
-  const rating = Number((typeof raw.vote_average === "number" ? raw.vote_average : 7.0).toFixed(1));
+  // ── Rating (backend: vote_average, 0–10) ────────────────────────────────
+  const rating = Number(
+    (typeof raw.vote_average === "number" ? raw.vote_average : raw.rating ?? 0).toFixed(1),
+  );
+
+  // ── Poster URL ──────────────────────────────────────────────────────────
+  let remotePoster = raw.poster_path || raw.remotePoster || null;
+  if (
+    remotePoster &&
+    typeof remotePoster === "string" &&
+    remotePoster.startsWith("/") &&
+    !remotePoster.startsWith("//")
+  ) {
+    remotePoster = `https://image.tmdb.org/t/p/w500${remotePoster}`;
+  }
+
+  // ── Language ────────────────────────────────────────────────────────────
+  const langCode = raw.original_language || raw.language || "en";
+  const language = langCode === "en" ? "English" : langCode;
+
+  // ── Similarity badge (recommendations only) ─────────────────────────────
+  const similarityText =
+    raw.similarity != null ? `${raw.similarity}% Match` : undefined;
+  const reasonText =
+    raw.similarity != null ? `ML Match: ${raw.similarity}%` : undefined;
 
   return {
-    id: raw.id || fallbackId,
-    title: rawTitle,
+    // Identifiers
+    id: raw.id ?? idx,
+    title: raw.title || raw.original_title || "Untitled",
+
+    // Core metadata
     year,
     rating,
-    runtime: raw.runtime || 120,
-    genres,
-    overview: raw.overview || "No overview available for this title.",
-    remotePoster: raw.poster_path || null,
-    popularity: Math.round(raw.popularity || 0),
-    similarity: similarityText,
-    reason: reasonText,
-    isMlRecommendation: true,
+    runtime: raw.runtime || 0,
+    genres: genreArray,
+    overview: raw.overview || "",
+    language,
+    certification: raw.certification || "PG-13",
+
+    // Popularity / engagement
+    popularity: typeof raw.popularity === "number" ? Math.round(raw.popularity) : 0,
+    voteCount: raw.vote_count || 0,
+
+    // Financials
+    budget: raw.budget || 0,
+    revenue: raw.revenue || 0,
+
+    // Visual
+    remotePoster,
+    hue: ((raw.id ?? idx) * 37) % 360,
+    backdrop: "neon",
+
+    // Recommendation metadata (only set on /predict results)
+    ...(similarityText !== undefined && { similarity: similarityText }),
+    ...(reasonText !== undefined && { reason: reasonText, isMlRecommendation: true }),
   };
 }
 
-/**
- * Fetches top N machine learning recommendations for a movie title
- * @param {string} movieTitle
- * @param {number} n
- * @param {Array} localMovies
- * @returns {Promise<Array>}
- */
-export async function fetchMlRecommendations(movieTitle, n = 12, localMovies = []) {
-  if (!movieTitle || typeof movieTitle !== "string") return [];
+// ─── API helpers ─────────────────────────────────────────────────────────────
 
+function makeController(ms = API_CONFIG.timeoutMs) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), API_CONFIG.timeoutMs);
-
-  try {
-    const url = `${API_CONFIG.backendUrl}${API_CONFIG.endpoints.predict}`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        title: movieTitle.trim(),
-        n: Math.min(Math.max(1, n), 50),
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      console.warn(`[ML API] Request returned status ${response.status}`);
-      return [];
-    }
-
-    const data = await response.json();
-    if (data?.recommendations && Array.isArray(data.recommendations)) {
-      return data.recommendations.map((item, idx) => mapMlMovie(item, idx + 1, localMovies));
-    }
-    return [];
-  } catch (err) {
-    console.warn(
-      `[ML API] Failed to fetch recommendations for "${movieTitle}":`,
-      err?.message || err,
-    );
-    return [];
-  } finally {
-    clearTimeout(timeoutId);
-  }
+  const id = setTimeout(() => controller.abort(), ms);
+  return { signal: controller.signal, clear: () => clearTimeout(id) };
 }
 
-/**
- * Searches movie titles in the ML backend dataset
- * @param {string} query
- * @param {number} limit
- * @returns {Promise<Array<string>>}
- */
-export async function searchMlMovies(query, limit = 10) {
-  if (!query || query.trim().length === 0) return [];
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), API_CONFIG.timeoutMs);
-
-  try {
-    const url = new URL(`${API_CONFIG.backendUrl}${API_CONFIG.endpoints.search}`);
-    url.searchParams.set("q", query.trim());
-    url.searchParams.set("limit", String(limit));
-
-    const response = await fetch(url.toString(), {
-      signal: controller.signal,
-    });
-
-    if (!response.ok) return [];
-    const data = await response.json();
-    return data?.results || [];
-  } catch {
-    return [];
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
+// ─── Catalog: paginated /movies ──────────────────────────────────────────────
 
 /**
- * Checks connectivity and health status of the Render ML backend
- * @returns {Promise<{ online: boolean, modelReady: boolean, totalMovies: number }>}
- */
-export async function checkBackendHealth() {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 6000);
-
-  try {
-    const url = `${API_CONFIG.backendUrl}${API_CONFIG.endpoints.health}`;
-    const response = await fetch(url, { signal: controller.signal });
-    if (!response.ok) return { online: false, modelReady: false, totalMovies: 0 };
-    const data = await response.json();
-    return {
-      online: true,
-      modelReady: Boolean(data?.model_loaded),
-      totalMovies: data?.total_movies || 0,
-    };
-  } catch {
-    return { online: false, modelReady: false, totalMovies: 0 };
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-/**
- * Fetches full details for a specific movie from the 69,405 backend dataset
- * @param {string|number} id
- * @returns {Promise<Object|null>}
- */
-export async function fetchMlMovieById(id) {
-  if (!id) return null;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), API_CONFIG.timeoutMs);
-
-  try {
-    const url = `${API_CONFIG.backendUrl}${API_CONFIG.endpoints.movieById(id)}`;
-    const response = await fetch(url, { signal: controller.signal });
-    if (!response.ok) return null;
-    const raw = await response.json();
-    return mapMlMovie(raw);
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-/**
- * Paginated movie catalog from the 69,405 dataset with filters
+ * Fetches a page of movies from the backend catalog (/movies).
+ * @param {{ page?, limit?, genre?, sortBy?, search?, minRating?, language? }} opts
+ * @returns {Promise<{ total, page, totalPages, results: Movie[] }|null>}
  */
 export async function fetchMlCatalog({
   page = 1,
@@ -196,9 +128,7 @@ export async function fetchMlCatalog({
   minRating = 0,
   language = "",
 } = {}) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), API_CONFIG.timeoutMs);
-
+  const { signal, clear } = makeController();
   try {
     const url = new URL(`${API_CONFIG.backendUrl}${API_CONFIG.endpoints.movies}`);
     url.searchParams.set("page", String(page));
@@ -209,24 +139,155 @@ export async function fetchMlCatalog({
     if (minRating > 0) url.searchParams.set("min_rating", String(minRating));
     if (language) url.searchParams.set("language", language);
 
-    const response = await fetch(url.toString(), { signal: controller.signal });
+    const response = await fetch(url.toString(), { signal });
     if (!response.ok) return null;
     const data = await response.json();
     return {
       total: data.total || 0,
       page: data.page || page,
       totalPages: data.total_pages || 1,
-      results: (data.results || []).map((m, idx) => mapMlMovie(m, idx + 1)),
+      results: (data.results || []).map((m, i) => normalizeMlMovie(m, i)),
     };
   } catch {
     return null;
   } finally {
-    clearTimeout(timeoutId);
+    clear();
   }
 }
 
+// ─── Single movie detail: /movies/{id} ───────────────────────────────────────
+
 /**
- * Fetches genre counts across the full dataset
+ * Fetches full details for a movie by ID.
+ * @param {string|number} id
+ * @returns {Promise<Movie|null>}
+ */
+export async function fetchMlMovieById(id) {
+  if (!id) return null;
+  const { signal, clear } = makeController();
+  try {
+    const url = `${API_CONFIG.backendUrl}${API_CONFIG.endpoints.movieById(id)}`;
+    const response = await fetch(url, { signal });
+    if (!response.ok) return null;
+    const raw = await response.json();
+    return normalizeMlMovie(raw);
+  } catch {
+    return null;
+  } finally {
+    clear();
+  }
+}
+
+// ─── Search: /search ─────────────────────────────────────────────────────────
+
+/**
+ * Searches movie titles across the full 69,405-movie dataset.
+ * @param {string} query
+ * @param {number} limit
+ * @returns {Promise<Movie[]>}
+ */
+export async function searchMlMovies(query, limit = 15) {
+  if (!query?.trim()) return [];
+  const { signal, clear } = makeController();
+  try {
+    const url = new URL(`${API_CONFIG.backendUrl}${API_CONFIG.endpoints.search}`);
+    url.searchParams.set("q", query.trim());
+    url.searchParams.set("limit", String(limit));
+
+    const response = await fetch(url.toString(), { signal });
+    if (!response.ok) return [];
+    const data = await response.json();
+    return (data.results || []).map((m, i) => normalizeMlMovie(m, i));
+  } catch {
+    return [];
+  } finally {
+    clear();
+  }
+}
+
+// ─── Recommendations: POST /predict ──────────────────────────────────────────
+
+/**
+ * Fetches ML-powered recommendations for a movie title.
+ * @param {string} movieTitle
+ * @param {number} n
+ * @param {Movie[]} localMovies  - Optional local catalog to enrich results
+ * @returns {Promise<Movie[]>}
+ */
+export async function fetchMlRecommendations(movieTitle, n = 12, localMovies = []) {
+  if (!movieTitle || typeof movieTitle !== "string") return [];
+
+  const { signal, clear } = makeController();
+  try {
+    const url = `${API_CONFIG.backendUrl}${API_CONFIG.endpoints.predict}`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: movieTitle.trim(), n: Math.min(Math.max(1, n), 50) }),
+      signal,
+    });
+
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    if (!Array.isArray(data?.recommendations)) return [];
+
+    return data.recommendations.map((item, idx) => {
+      const normalized = normalizeMlMovie(item, idx + 1);
+      // If the movie exists in local catalog, prefer its richer data
+      const localMatch = localMovies.find(
+        (m) =>
+          String(m.id) === String(normalized.id) ||
+          m.title?.toLowerCase() === normalized.title?.toLowerCase(),
+      );
+      if (localMatch) {
+        return {
+          ...localMatch,
+          reason: normalized.reason || "ML Recommendation",
+          similarity: normalized.similarity,
+          isMlRecommendation: true,
+        };
+      }
+      return normalized;
+    });
+  } catch (err) {
+    console.warn(`[ML API] Recommendations failed for "${movieTitle}":`, err?.message);
+    return [];
+  } finally {
+    clear();
+  }
+}
+
+// ─── Health: /health ─────────────────────────────────────────────────────────
+
+/**
+ * Checks backend health and reports model status.
+ * @returns {Promise<{ online: boolean, modelReady: boolean, totalMovies: number }>}
+ */
+export async function checkBackendHealth() {
+  const { signal, clear } = makeController(6000);
+  try {
+    const url = `${API_CONFIG.backendUrl}${API_CONFIG.endpoints.health}`;
+    const response = await fetch(url, { signal });
+    if (!response.ok) return { online: false, modelReady: false, totalMovies: 0 };
+    const data = await response.json();
+    return {
+      online: true,
+      modelReady: Boolean(data?.model_loaded),
+      totalMovies: data?.total_movies || 0,
+    };
+  } catch {
+    return { online: false, modelReady: false, totalMovies: 0 };
+  } finally {
+    clear();
+  }
+}
+
+// ─── Genres: /genres ─────────────────────────────────────────────────────────
+
+/**
+ * Fetches all genres and their movie counts from the backend.
+ * @returns {Promise<Array<{ name: string, count: number }>>}
  */
 export async function fetchMlGenres() {
   try {
@@ -239,4 +300,3 @@ export async function fetchMlGenres() {
     return [];
   }
 }
-

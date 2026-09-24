@@ -165,11 +165,18 @@ function MovieDetails() {
     }
   };
 
+  // Normalise fields — backend objects use the same shape via normalizeMlMovie()
+  // but we guard here for any legacy or partially-merged objects.
+  const safeGenres = Array.isArray(movie.genres) ? movie.genres : [];
+  const safeRating = Number((movie.rating ?? movie.vote_average ?? 0).toFixed(1));
+  const safeYear = movie.year || movie.release_year || "";
+  const safeLanguage = movie.language || (movie.original_language === "en" ? "English" : movie.original_language) || "—";
+
   const info = [
-    { label: "Language", value: movie.language },
+    { label: "Language", value: safeLanguage },
     { label: "Budget", value: formatMoney(movie.budget) },
     { label: "Revenue", value: formatMoney(movie.revenue) },
-    { label: "Popularity", value: `${movie.popularity} pts` },
+    { label: "Popularity", value: `${movie.popularity || 0} pts` },
   ];
 
   return (
@@ -207,15 +214,15 @@ function MovieDetails() {
             <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
               <span className="inline-flex items-center gap-1 font-semibold text-gold">
                 <Star className="h-4 w-4 fill-current" aria-hidden="true" />
-                {movie.rating.toFixed(1)}
+                {safeRating.toFixed(1)}
                 <span className="text-muted-foreground">/10</span>
               </span>
-              <span>{movie.year}</span>
+              <span>{safeYear}</span>
               <span>{formatRuntime(movie.runtime)}</span>
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
-              {movie.genres.map((genre) => (
+              {safeGenres.map((genre) => (
                 <span key={genre} className="glass rounded-full px-3 py-1 text-xs">
                   {genre}
                 </span>

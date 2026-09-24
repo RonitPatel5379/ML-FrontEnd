@@ -1,12 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { Info, Search, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Info, Loader2, Search, X } from "lucide-react";
 
 import PageHeader from "../components/PageHeader";
 import FilterBar, { DEFAULT_FILTERS, applyFilters } from "../components/FilterBar";
 import MovieGrid from "../components/MovieGrid";
 import ErrorState from "../components/ErrorState";
 import { useMovies } from "../context/MovieContext";
+import { fetchMlCatalog } from "../services/mlApi";
 
 export const Route = createFileRoute("/discover")({
   head: () => ({
@@ -27,10 +28,26 @@ export const Route = createFileRoute("/discover")({
   component: Discover,
 });
 
+const SORT_MAP = {
+  default: "popularity",
+  rating: "rating",
+  newest: "newest",
+  oldest: "oldest",
+  az: "az",
+};
+
 function Discover() {
-  const { movies, loading, error, reload } = useMovies();
+  const { movies: contextMovies, loading: ctxLoading, error, reload, totalCount } = useMovies();
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
+
+  // ── Backend catalog paging state ─────────────────────────────────────────
+  const [backendMovies, setBackendMovies] = useState([]);
+  const [backendPage, setBackendPage] = useState(0); // 0 = not yet fetched
+  const [backendTotal, setBackendTotal] = useState(0);
+  const [backendTotalPages, setBackendTotalPages] = useState(1);
+  const [backendLoading, setBackendLoading] = useState(false);
+  const loadMoreRef = useRef(null);
 
   // Sync URL search params on mount
   useEffect(() => {
@@ -43,7 +60,82 @@ function Discover() {
     }
   }, []);
 
-  const results = useMemo(() => applyFilters(movies, filters, query), [movies, filters, query]);
+  // ── Backend sort parameter ───────────────────────────────────────────────
+  const backendSort = useMemo(() => SORT_MAP[filters.sortBy] || "popularity", [filters.sortBy]);
+
+  // ── Fetch a specific backend page ────────────────────────────────────────
+  const fetchBackendPage = useCallback(
+    async (page) => {
+      if (backendLoading) return;
+      setBackendLoading(true);
+      try {
+        const data = await fetchMlCatalog({
+          page,
+          limit: 48,
+          genre: filters.genre || "",
+          sortBy: backendSort,
+          search: query.trim(),
+          minRating: Number(filters.minRating) || 0,
+          language: filters.language || "",
+        });
+        if (!data) return;
+        setBackendTotal(data.total);
+        setBackendTotalPages(data.totalPages);
+        setBackendMovies((prev) =>
+          page === 1 ? data.results : [...prev, ...data.results],
+        );
+        setBackendPage(page);
+      } finally {
+        setBackendLoading(false);
+      }
+    },
+    [backendLoading, filters.genre, filters.language, filters.minRating, backendSort, query],
+  );
+
+  // ── Reset & initial fetch whenever filters / query change ────────────────
+  const filtersKey = JSON.stringify({ query, filters });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setBackendMovies([]);
+    setBackendPage(0);
+    fetchBackendPage(1);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtersKey]);
+
+  // ── Intersection Observer for infinite scroll ────────────────────────────
+  useEffect(() => {
+    const sentinel = loadMoreRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (
+          entry.isIntersecting &&
+          !backendLoading &&
+          backendPage > 0 &&
+          backendPage < backendTotalPages
+        ) {
+          fetchBackendPage(backendPage + 1);
+        }
+      },
+      { threshold: 0.1 },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [backendLoading, backendPage, backendTotalPages, fetchBackendPage]);
+
+  // ── Local filter (for quick client-side highlighting) ───────────────────
+  // We show backend results primarily. For instant local results while the
+  // backend loads, we also apply filters to the context catalog.
+  const localResults = useMemo(
+    () => applyFilters(contextMovies, filters, query),
+    [contextMovies, filters, query],
+  );
+
+  // Decide what to show: backend paged results (primary) or local (fallback)
+  const hasBackend = backendMovies.length > 0;
+  const displayMovies = hasBackend ? backendMovies : localResults;
+  const displayTotal = hasBackend ? backendTotal : localResults.length;
+  const loading = ctxLoading && !hasBackend;
 
   const hasActiveFilters = useMemo(
     () =>
@@ -55,11 +147,10 @@ function Discover() {
     [filters],
   );
 
-  // Check if matches exist that are only hidden because of active filters
   const hiddenMatchesCount = useMemo(() => {
-    if (!query.trim() || !hasActiveFilters || results.length > 0) return 0;
-    return applyFilters(movies, DEFAULT_FILTERS, query).length;
-  }, [movies, query, hasActiveFilters, results.length]);
+    if (!query.trim() || !hasActiveFilters || displayMovies.length > 0) return 0;
+    return applyFilters(contextMovies, DEFAULT_FILTERS, query).length;
+  }, [contextMovies, query, hasActiveFilters, displayMovies.length]);
 
   const handleReset = () => {
     setFilters(DEFAULT_FILTERS);
@@ -71,11 +162,12 @@ function Discover() {
       <PageHeader
         eyebrow="Discover"
         title="Find exactly what you're in the mood for"
-        description="Search across titles, directors, cast and genres, then narrow it down with filters."
+        description={`Search ${totalCount.toLocaleString()} movies. Filter by genre, year, rating and language.`}
       >
         <div className="glass flex items-center gap-3 rounded-full px-5 py-3">
           <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <input
+            id="discover-search-input"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search movies, actors, directors, genres, years..."
@@ -85,6 +177,7 @@ function Discover() {
           {query && (
             <button
               type="button"
+              id="discover-clear-search"
               onClick={() => setQuery("")}
               aria-label="Clear search query"
               className="text-muted-foreground transition-colors hover:text-foreground"
@@ -104,7 +197,7 @@ function Discover() {
               filters={filters}
               onChange={setFilters}
               onReset={handleReset}
-              resultCount={results.length}
+              resultCount={displayTotal}
             />
 
             {hiddenMatchesCount > 0 && (
@@ -118,6 +211,7 @@ function Discover() {
                 </div>
                 <button
                   type="button"
+                  id="discover-reset-filters"
                   onClick={() => setFilters(DEFAULT_FILTERS)}
                   className="btn-primary shrink-0 rounded-full px-4 py-1.5 text-xs font-semibold"
                 >
@@ -127,12 +221,27 @@ function Discover() {
             )}
 
             <MovieGrid
-              movies={results}
+              movies={displayMovies}
               loading={loading}
               onEmptyAction={handleReset}
               emptyActionLabel={query || hasActiveFilters ? "Reset search & filters" : "Browse trending"}
               emptyActionTo="/trending"
             />
+
+            {/* Infinite scroll sentinel */}
+            <div ref={loadMoreRef} className="flex justify-center py-6" aria-live="polite">
+              {backendLoading && (
+                <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  Loading more movies…
+                </span>
+              )}
+              {!backendLoading && backendPage > 0 && backendPage >= backendTotalPages && displayMovies.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Showing all {displayTotal.toLocaleString()} movies
+                </p>
+              )}
+            </div>
           </>
         )}
       </div>
