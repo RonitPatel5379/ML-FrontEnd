@@ -207,6 +207,9 @@ export async function searchMlMovies(query, limit = 15) {
 
 // ─── Recommendations: POST /predict ──────────────────────────────────────────
 
+// In-memory cache for ML recommendations to avoid repeated calls for the same movie
+const mlRecsCache = new Map();
+
 /**
  * Fetches ML-powered recommendations for a movie title.
  * @param {string} movieTitle
@@ -217,13 +220,39 @@ export async function searchMlMovies(query, limit = 15) {
 export async function fetchMlRecommendations(movieTitle, n = 12, localMovies = []) {
   if (!movieTitle || typeof movieTitle !== "string") return [];
 
+  const normalizedTitle = movieTitle.trim();
+  const cacheKey = `${normalizedTitle.toLowerCase()}_${n}`;
+
+  if (mlRecsCache.has(cacheKey)) {
+    const cached = mlRecsCache.get(cacheKey);
+    // Enrich with any newly loaded localMovies if available
+    if (localMovies && localMovies.length > 0) {
+      return cached.map((rec) => {
+        const localMatch = localMovies.find(
+          (m) =>
+            String(m.id) === String(rec.id) ||
+            m.title?.toLowerCase() === rec.title?.toLowerCase(),
+        );
+        return localMatch
+          ? {
+              ...localMatch,
+              reason: rec.reason || "ML Recommendation",
+              similarity: rec.similarity,
+              isMlRecommendation: true,
+            }
+          : rec;
+      });
+    }
+    return cached;
+  }
+
   const { signal, clear } = makeController();
   try {
     const url = `${API_CONFIG.backendUrl}${API_CONFIG.endpoints.predict}`;
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: movieTitle.trim(), n: Math.min(Math.max(1, n), 50) }),
+      body: JSON.stringify({ title: normalizedTitle, n: Math.min(Math.max(1, n), 50) }),
       signal,
     });
 
@@ -232,7 +261,7 @@ export async function fetchMlRecommendations(movieTitle, n = 12, localMovies = [
     const data = await response.json();
     if (!Array.isArray(data?.recommendations)) return [];
 
-    return data.recommendations.map((item, idx) => {
+    const results = data.recommendations.map((item, idx) => {
       const normalized = normalizeMlMovie(item, idx + 1);
       // If the movie exists in local catalog, prefer its richer data
       const localMatch = localMovies.find(
@@ -250,6 +279,11 @@ export async function fetchMlRecommendations(movieTitle, n = 12, localMovies = [
       }
       return normalized;
     });
+
+    if (results.length > 0) {
+      mlRecsCache.set(cacheKey, results);
+    }
+    return results;
   } catch (err) {
     console.warn(`[ML API] Recommendations failed for "${movieTitle}":`, err?.message);
     return [];

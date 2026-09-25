@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Sparkles } from "lucide-react";
 
@@ -9,6 +9,7 @@ import ErrorState from "../components/ErrorState";
 import { HeroSkeleton } from "../components/LoadingSpinner";
 import { useMovies } from "../context/MovieContext";
 import { useUser } from "../context/UserContext";
+import { MOVIES } from "../data/movies";
 import { recommendMovies } from "../utils/recommendationEngine";
 import { getRankedTrendingMovies } from "../utils/trending";
 import { seeded } from "../utils/helpers";
@@ -91,37 +92,66 @@ function Home() {
   );
 
   const [backendRecommendations, setBackendRecommendations] = useState([]);
-  const [isBackendLoading, setIsBackendLoading] = useState(false);
   const [sourceMovieTitle, setSourceMovieTitle] = useState("");
 
-  useEffect(() => {
-    // When a movie is in Continue Watching, dynamically query the Python ML backend!
-    // Priority:
-    // 1. Current movie in Continue Watching
-    // 2. Most recently viewed movie in recent
+  // Determine active movie ID stably (does not change on playback percentage ticks)
+  const activeMovieId = useMemo(() => {
+    // 1. Current movie in Continue Watching (in progress, unwatched)
+    const inProgress = (recent || []).find(
+      (entry) => (entry.progress ?? 0) < 100 && !(watched || []).includes(entry.id),
+    );
+    if (inProgress?.id) return inProgress.id;
+
+    // 2. Most recently viewed movie in history
+    if (recent?.length) {
+      const firstRecent = recent[0];
+      return firstRecent?.id ?? firstRecent;
+    }
+
     // 3. User's top favorite movie
-    const activeMovie =
-      continueWatching[0] ||
-      (recent.length ? movies.find((m) => m.id === (recent[0]?.id ?? recent[0])) : null) ||
-      (favorites.length ? movies.find((m) => m.id === favorites[0]) : null);
+    if (favorites?.length) {
+      return favorites[0];
+    }
 
-    const titleToQuery = activeMovie?.title;
+    return null;
+  }, [recent, watched, favorites]);
 
-    if (!titleToQuery) {
+  // Resolve movie title stably
+  const activeMovieTitle = useMemo(() => {
+    if (!activeMovieId) return "";
+    const fromLoaded = movies.find((m) => String(m.id) === String(activeMovieId));
+    if (fromLoaded?.title) return fromLoaded.title;
+    const fromCurated = MOVIES.find((m) => String(m.id) === String(activeMovieId));
+    return fromCurated?.title || "";
+  }, [activeMovieId, movies]);
+
+  const lastQueriedTitleRef = useRef("");
+  const moviesRef = useRef(movies);
+  moviesRef.current = movies;
+
+  useEffect(() => {
+    if (!activeMovieTitle) {
+      lastQueriedTitleRef.current = "";
       setBackendRecommendations([]);
       setSourceMovieTitle("");
       return;
     }
 
-    let isSubscribed = true;
-    setIsBackendLoading(true);
+    // If we have already queried for this exact movie title, avoid redundant network requests
+    if (lastQueriedTitleRef.current === activeMovieTitle) {
+      return;
+    }
 
-    fetchMlRecommendations(titleToQuery, 14, movies)
+    lastQueriedTitleRef.current = activeMovieTitle;
+    let isSubscribed = true;
+
+    // Quietly query the ML model without triggering constant screen refreshes or skeleton flickers
+    fetchMlRecommendations(activeMovieTitle, 14, moviesRef.current)
       .then((recs) => {
         if (isSubscribed) {
           if (recs && recs.length > 0) {
             setBackendRecommendations(recs);
-            setSourceMovieTitle(titleToQuery);
+            setSourceMovieTitle(activeMovieTitle);
           } else {
             setBackendRecommendations([]);
           }
@@ -130,15 +160,12 @@ function Home() {
       .catch((err) => {
         console.warn("[Home] ML backend query error:", err);
         if (isSubscribed) setBackendRecommendations([]);
-      })
-      .finally(() => {
-        if (isSubscribed) setIsBackendLoading(false);
       });
 
     return () => {
       isSubscribed = false;
     };
-  }, [continueWatching, recent, favorites, movies]);
+  }, [activeMovieTitle]);
 
   const isFromBackend = backendRecommendations.length > 0;
 
@@ -198,11 +225,6 @@ function Home() {
                       Live API Connected
                     </span>
                   )}
-                  {isBackendLoading && (
-                    <span className="inline-flex items-center rounded-full bg-amber-500/10 px-2.5 py-0.5 text-[10px] font-semibold text-amber-400 border border-amber-500/20">
-                      Querying ML Model...
-                    </span>
-                  )}
                 </div>
                 <h2 className="mt-2 font-display text-2xl font-bold sm:text-3xl">
                   {isFromBackend
@@ -238,7 +260,7 @@ function Home() {
               : recommendationSubtitle
           }
           movies={isFromBackend ? backendRecommendations : recommendations}
-          loading={loading || isBackendLoading}
+          loading={loading && !backendRecommendations.length && !recommendations.length}
           showReason
           seeAllTo="/discover"
         />
@@ -249,7 +271,7 @@ function Home() {
             title="Because your taste says so"
             subtitle="Overall profile affinity across your favorite genres and history"
             movies={recommendations}
-            loading={loading}
+            loading={loading && !recommendations.length}
             showReason
             seeAllTo="/discover"
           />
