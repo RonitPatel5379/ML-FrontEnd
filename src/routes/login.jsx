@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Clapperboard, Lock, Mail, Sparkles } from "lucide-react";
+import { Clapperboard, Lock, Mail } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "../context/AuthContext";
@@ -26,9 +26,9 @@ const inputClass =
   "w-full rounded-xl border border-border bg-surface px-10 py-3 text-sm outline-none focus:border-primary";
 
 function Login() {
-  const { login, loginAsDemo, isAuthenticated } = useAuth();
+  const { login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
-  const [form, setForm] = useState({ email: "", password: "", remember: true });
+  const [form, setForm] = useState({ email: "", password: "", remember: false });
   const [busy, setBusy] = useState(false);
 
   // If already signed in, immediately redirect to Home
@@ -50,18 +50,6 @@ function Login() {
       await navigate({ to: "/", replace: true });
     } catch (error) {
       toast.error(error.message || "Could not sign you in.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleDemoLogin = async () => {
-    setBusy(true);
-    try {
-      await loginAsDemo();
-      await navigate({ to: "/", replace: true });
-    } catch (error) {
-      toast.error(error.message || "Could not sign in as demo user.");
     } finally {
       setBusy(false);
     }

@@ -51,7 +51,8 @@ async function getProfileUser(authUser) {
 function syncCookie(hasSession) {
   if (typeof document !== "undefined") {
     if (hasSession) {
-      document.cookie = "cineverse_session=1; path=/; max-age=2592000; SameSite=Lax";
+      // Session cookie without max-age: browser deletes it automatically when closed!
+      document.cookie = "cineverse_session=1; path=/; SameSite=Lax";
     } else {
       document.cookie = "cineverse_session=; path=/; max-age=0; SameSite=Lax";
     }
@@ -61,10 +62,20 @@ function syncCookie(hasSession) {
 function getStoredUser() {
   if (typeof window === "undefined") return null;
   try {
-    for (let i = 0; i < localStorage.length; i++) {
+    // Purge any stale tokens from localStorage so closing and reopening app cannot auto-login
+    for (let i = localStorage.length - 1; i >= 0; i--) {
       const key = localStorage.key(i);
       if (key && key.startsWith("sb-") && key.endsWith("-auth-token")) {
-        const raw = localStorage.getItem(key);
+        localStorage.removeItem(key);
+      }
+    }
+
+    // Auth is strictly session-bound (sessionStorage): when the app or tab is closed,
+    // the session is destroyed and the user MUST log in again upon opening the website.
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (key && key.startsWith("sb-") && key.endsWith("-auth-token")) {
+        const raw = sessionStorage.getItem(key);
         if (raw) {
           const parsed = JSON.parse(raw);
           const authUser = parsed.user || parsed.currentSession?.user;
@@ -187,10 +198,52 @@ export function AuthProvider({ children }) {
     } catch (e) {
       console.warn("Sign out warning:", e);
     }
+    try {
+      if (typeof sessionStorage !== "undefined") sessionStorage.clear();
+      if (typeof localStorage !== "undefined") {
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith("sb-") && key.endsWith("-auth-token")) {
+            localStorage.removeItem(key);
+          }
+        }
+      }
+    } catch {}
     applyUser(null);
     syncCookie(false);
     toast.message("Signed out");
   }, [applyUser]);
+
+  // Inactivity timeout: if inactive for 45 minutes, auto log out
+  useEffect(() => {
+    if (!user) return;
+    const INACTIVITY_TIMEOUT = 45 * 60 * 1000;
+    let timer;
+
+    const resetTimer = () => {
+      clearTimeout(timer);
+      try {
+        if (typeof sessionStorage !== "undefined") {
+          sessionStorage.setItem("cineverse_last_active", Date.now().toString());
+        }
+      } catch {}
+      timer = setTimeout(() => {
+        toast.info("Session expired", {
+          description: "You were inactive. Please sign in again.",
+        });
+        logout();
+      }, INACTIVITY_TIMEOUT);
+    };
+
+    resetTimer();
+    const events = ["mousedown", "keydown", "touchstart", "scroll"];
+    events.forEach((ev) => window.addEventListener(ev, resetTimer, { passive: true }));
+
+    return () => {
+      clearTimeout(timer);
+      events.forEach((ev) => window.removeEventListener(ev, resetTimer));
+    };
+  }, [user, logout]);
 
   const updateProfile = useCallback(
     async ({ name }) => {
