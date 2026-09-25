@@ -149,19 +149,6 @@ function Login() {
             {busy ? "Signing in..." : "Sign in"}
           </button>
 
-          <div className="relative my-2 text-center text-xs text-muted-foreground">
-            <span className="bg-surface/80 px-2 rounded">or explore instantly</span>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleDemoLogin}
-            disabled={busy}
-            className="btn-glass w-full rounded-full py-3 text-sm font-semibold flex items-center justify-center gap-2 hover:bg-white/10 transition-colors"
-          >
-            <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />
-            Quick Demo Sign-In (1-Click)
-          </button>
         </form>
 
         <p className="mt-6 text-center text-xs text-muted-foreground">
