@@ -32,7 +32,7 @@ const SOCIALS = [
   { Icon: Twitter, label: "Twitter", href: "https://twitter.com" },
   { Icon: Instagram, label: "Instagram", href: "https://instagram.com" },
   { Icon: Youtube, label: "YouTube", href: "https://youtube.com" },
-  { Icon: Github, label: "GitHub", href: "https://github.com/RonitPatel5379/ML-FrontEnd" },
+  { Icon: Github, label: "GitHub", href: "https://github.com" }
 ];
 
 export default function Footer() {
