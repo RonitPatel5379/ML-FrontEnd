@@ -205,7 +205,37 @@ function Home() {
     [movies],
   );
 
-  const recommendationSubtitle = recommendations[0]?.reason || "Tuned to your taste profile";
+  const recommendationSubtitle = useMemo(() => {
+    const genres = preferences?.genres || [];
+    const languages = preferences?.languages || [];
+    const period = preferences?.period && preferences.period !== "any" ? preferences.period : null;
+
+    if (languages.length > 0 && genres.length > 0) {
+      return `Curated for: ${languages.join(", ")} · ${genres.slice(0, 3).join(", ")}`;
+    }
+    if (genres.length > 0) {
+      return `Curated for your favorite genres: ${genres.slice(0, 3).join(", ")}`;
+    }
+    if (languages.length > 0) {
+      return `Curated for your preferred languages: ${languages.join(", ")}`;
+    }
+    if (period) {
+      return `Top recommendations from ${period} and newer`;
+    }
+    return recommendations[0]?.reason || "Tuned to your taste profile";
+  }, [preferences, recommendations]);
+
+  const recommendationDescription = useMemo(() => {
+    const genres = preferences?.genres || [];
+    const languages = preferences?.languages || [];
+    if (languages.length > 0 || genres.length > 0) {
+      const parts = [];
+      if (genres.length > 0) parts.push(`genres (${genres.join(", ")})`);
+      if (languages.length > 0) parts.push(`language (${languages.join(", ")})`);
+      return `Personalized specifically to match your preferred ${parts.join(" and ")}.`;
+    }
+    return "Our engine blends genre affinity, ratings, popularity and your recent activity into a single score.";
+  }, [preferences]);
 
   if (error) {
     return (
@@ -260,7 +290,7 @@ function Home() {
                 <p className="mt-2 max-w-xl text-sm text-muted-foreground">
                   {isFromBackend
                     ? `Predicted in real-time by the Python FastAPI backend on Render using TF-IDF vectorization and KMeans clusters closest to "${sourceMovieTitle}".`
-                    : "Our engine blends genre affinity, ratings, popularity and your recent activity into a single score."}
+                    : recommendationDescription}
                 </p>
               </div>
               <Link
@@ -295,7 +325,7 @@ function Home() {
         {isFromBackend && (
           <MovieRow
             title="Because your taste says so"
-            subtitle="Overall profile affinity across your favorite genres and history"
+            subtitle={recommendationSubtitle}
             movies={recommendations}
             loading={loading && !recommendations.length}
             showReason

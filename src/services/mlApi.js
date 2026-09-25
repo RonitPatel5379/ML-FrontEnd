@@ -11,6 +11,7 @@
  */
 
 import { API_CONFIG } from "../config/api";
+import { normalizeLanguage } from "../data/genres";
 
 // ─── Normalizer ──────────────────────────────────────────────────────────────
 
@@ -62,8 +63,8 @@ export function normalizeMlMovie(raw, idx = 0) {
   }
 
   // ── Language ────────────────────────────────────────────────────────────
-  const langCode = raw.original_language || raw.language || "en";
-  const language = langCode === "en" ? "English" : langCode;
+  const rawLang = raw.original_language || raw.language || "en";
+  const language = normalizeLanguage(rawLang);
 
   // ── Similarity badge (recommendations only) ─────────────────────────────
   const similarityText =
