@@ -179,6 +179,32 @@ function Home() {
     [movies],
   );
 
+  const popularMovies = useMemo(
+    () => [...movies].sort((a, b) => b.popularity - a.popularity).slice(4, 18),
+    [movies],
+  );
+
+  const topRatedMovies = useMemo(
+    () => [...movies].sort((a, b) => b.rating - a.rating).slice(0, 14),
+    [movies],
+  );
+
+  const newReleasesMovies = useMemo(
+    () => [...movies].sort((a, b) => b.year - a.year).slice(0, 14),
+    [movies],
+  );
+
+  const categoryRows = useMemo(
+    () =>
+      CATEGORY_ROWS.map((row) => ({
+        title: row.title,
+        movies: movies
+          .filter((movie) => Array.isArray(movie.genres) && movie.genres.some((g) => row.genres.includes(g)))
+          .slice(0, 14),
+      })),
+    [movies],
+  );
+
   const recommendationSubtitle = recommendations[0]?.reason || "Tuned to your taste profile";
 
   if (error) {
@@ -279,34 +305,34 @@ function Home() {
 
         <MovieRow
           title="Popular Movies"
-          movies={[...movies].sort((a, b) => b.popularity - a.popularity).slice(4, 18)}
-          loading={loading}
+          movies={popularMovies}
+          loading={loading && !popularMovies.length}
         />
         <MovieRow
           title="Top Rated"
-          movies={[...movies].sort((a, b) => b.rating - a.rating).slice(0, 14)}
-          loading={loading}
+          movies={topRatedMovies}
+          loading={loading && !topRatedMovies.length}
         />
         <MovieRow
           title="New Releases"
-          movies={[...movies].sort((a, b) => b.year - a.year).slice(0, 14)}
-          loading={loading}
+          movies={newReleasesMovies}
+          loading={loading && !newReleasesMovies.length}
         />
         <MovieRow
           title="Trending This Week"
           subtitle="Top charts updated weekly"
           movies={trendingThisWeek}
-          loading={loading}
+          loading={loading && !trendingThisWeek.length}
           showRank
           seeAllTo="/trending"
         />
 
-        {CATEGORY_ROWS.map((row) => (
+        {categoryRows.map((row) => (
           <MovieRow
             key={row.title}
             title={row.title}
-            movies={movies.filter((movie) => movie.genres.some((g) => row.genres.includes(g)))}
-            loading={loading}
+            movies={row.movies}
+            loading={loading && !row.movies.length}
           />
         ))}
       </div>

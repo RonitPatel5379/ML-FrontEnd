@@ -23,6 +23,7 @@ export default function MovieCard({ movie, width = "row", rank, progress, reason
       <Link
         to="/movie/$id"
         params={{ id: String(movie.id) }}
+        preload="intent"
         className="block rounded-2xl focus-visible:ring-2 focus-visible:ring-primary"
         aria-label={`${movie.title}, ${movie.year}, rated ${movie.rating}`}
       >

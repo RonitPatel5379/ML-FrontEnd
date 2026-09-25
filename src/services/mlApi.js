@@ -112,10 +112,15 @@ function makeController(ms = API_CONFIG.timeoutMs) {
   return { signal: controller.signal, clear: () => clearTimeout(id) };
 }
 
+// ─── In-memory caches for fast sub-millisecond responses ──────────────────────
+const catalogCache = new Map();
+const movieDetailCache = new Map();
+const searchCache = new Map();
+
 // ─── Catalog: paginated /movies ──────────────────────────────────────────────
 
 /**
- * Fetches a page of movies from the backend catalog (/movies).
+ * Fetches a page of movies from the backend catalog (/movies) with in-memory caching.
  * @param {{ page?, limit?, genre?, sortBy?, search?, minRating?, language? }} opts
  * @returns {Promise<{ total, page, totalPages, results: Movie[] }|null>}
  */
@@ -128,6 +133,11 @@ export async function fetchMlCatalog({
   minRating = 0,
   language = "",
 } = {}) {
+  const cacheKey = `${page}_${limit}_${genre}_${sortBy}_${search.trim().toLowerCase()}_${minRating}_${language}`;
+  if (catalogCache.has(cacheKey)) {
+    return catalogCache.get(cacheKey);
+  }
+
   const { signal, clear } = makeController();
   try {
     const url = new URL(`${API_CONFIG.backendUrl}${API_CONFIG.endpoints.movies}`);
@@ -142,12 +152,14 @@ export async function fetchMlCatalog({
     const response = await fetch(url.toString(), { signal });
     if (!response.ok) return null;
     const data = await response.json();
-    return {
+    const result = {
       total: data.total || 0,
       page: data.page || page,
       totalPages: data.total_pages || 1,
       results: (data.results || []).map((m, i) => normalizeMlMovie(m, i)),
     };
+    catalogCache.set(cacheKey, result);
+    return result;
   } catch {
     return null;
   } finally {
@@ -158,19 +170,28 @@ export async function fetchMlCatalog({
 // ─── Single movie detail: /movies/{id} ───────────────────────────────────────
 
 /**
- * Fetches full details for a movie by ID.
+ * Fetches full details for a movie by ID with in-memory caching.
  * @param {string|number} id
  * @returns {Promise<Movie|null>}
  */
 export async function fetchMlMovieById(id) {
   if (!id) return null;
+  const cacheKey = String(id);
+  if (movieDetailCache.has(cacheKey)) {
+    return movieDetailCache.get(cacheKey);
+  }
+
   const { signal, clear } = makeController();
   try {
     const url = `${API_CONFIG.backendUrl}${API_CONFIG.endpoints.movieById(id)}`;
     const response = await fetch(url, { signal });
     if (!response.ok) return null;
     const raw = await response.json();
-    return normalizeMlMovie(raw);
+    const normalized = normalizeMlMovie(raw);
+    if (normalized) {
+      movieDetailCache.set(cacheKey, normalized);
+    }
+    return normalized;
   } catch {
     return null;
   } finally {
@@ -181,13 +202,18 @@ export async function fetchMlMovieById(id) {
 // ─── Search: /search ─────────────────────────────────────────────────────────
 
 /**
- * Searches movie titles across the full 69,405-movie dataset.
+ * Searches movie titles across the full 69,405-movie dataset with caching.
  * @param {string} query
  * @param {number} limit
  * @returns {Promise<Movie[]>}
  */
 export async function searchMlMovies(query, limit = 15) {
   if (!query?.trim()) return [];
+  const cacheKey = `${query.trim().toLowerCase()}_${limit}`;
+  if (searchCache.has(cacheKey)) {
+    return searchCache.get(cacheKey);
+  }
+
   const { signal, clear } = makeController();
   try {
     const url = new URL(`${API_CONFIG.backendUrl}${API_CONFIG.endpoints.search}`);
@@ -197,7 +223,9 @@ export async function searchMlMovies(query, limit = 15) {
     const response = await fetch(url.toString(), { signal });
     if (!response.ok) return [];
     const data = await response.json();
-    return (data.results || []).map((m, i) => normalizeMlMovie(m, i));
+    const results = (data.results || []).map((m, i) => normalizeMlMovie(m, i));
+    searchCache.set(cacheKey, results);
+    return results;
   } catch {
     return [];
   } finally {

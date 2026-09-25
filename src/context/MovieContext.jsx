@@ -30,10 +30,8 @@ import { matchesQuery } from "../utils/helpers";
 const MovieContext = createContext(null);
 
 // Pages to load on initial paint (fast first experience)
-const INITIAL_PAGES = 3;
-// Max pages to stream in background (100 movies/page × 700 pages ≈ 70k)
-const STREAM_LIMIT = 700;
-const PAGE_SIZE = 100;
+const INITIAL_PAGES = 2;
+const PAGE_SIZE = 60;
 
 export function MovieProvider({ children }) {
   const [movies, setMovies] = useState(MOVIES); // instant paint with local data
@@ -46,7 +44,7 @@ export function MovieProvider({ children }) {
   const movieMap = useRef(new Map(MOVIES.map((m) => [String(m.id), m])));
 
   /**
-   * Merges new backend records into the stable map and triggers a re-render.
+   * Merges new backend records into the stable map.
    * Local curated data is NOT overwritten so rich descriptions are preserved.
    */
   const mergeInto = useCallback((records) => {
@@ -58,7 +56,6 @@ export function MovieProvider({ children }) {
         movieMap.current.set(key, m);
         changed = true;
       } else if (
-        // Prefer backend overview when the existing one is a placeholder
         m.overview &&
         m.overview.length > 20 &&
         (!existing.overview || existing.overview.startsWith("Explore full"))
@@ -67,15 +64,16 @@ export function MovieProvider({ children }) {
         changed = true;
       }
     }
-    if (changed) setMovies(Array.from(movieMap.current.values()));
+    if (changed) {
+      setMovies(Array.from(movieMap.current.values()));
+    }
   }, []);
 
-  // ── Phase 1: load first N pages immediately ──────────────────────────────
+  // ── Load initial top popular pages smoothly without blocking ────────────
   const loadInitialPages = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      // Fetch first page to get the total count
       const first = await fetchMlCatalog({ page: 1, limit: PAGE_SIZE, sortBy: "popularity" });
       if (!first) throw new Error("Backend unreachable — showing local catalog.");
 
@@ -83,7 +81,7 @@ export function MovieProvider({ children }) {
       mergeInto(first.results);
       setBackendReady(true);
 
-      // Fetch remaining initial pages in parallel
+      // Load 2nd page in parallel for rich catalog variety
       const remaining = Math.min(INITIAL_PAGES - 1, first.totalPages - 1);
       if (remaining > 0) {
         const promises = Array.from({ length: remaining }, (_, i) =>
@@ -94,7 +92,7 @@ export function MovieProvider({ children }) {
       }
     } catch (err) {
       console.warn("[MovieContext] Backend init failed, using local catalog:", err?.message);
-      setError(null); // Don't surface error — local data is already shown
+      setError(null);
     } finally {
       setLoading(false);
     }
@@ -104,36 +102,12 @@ export function MovieProvider({ children }) {
     loadInitialPages();
   }, [loadInitialPages]);
 
-  // ── Phase 2: stream remaining pages in background ────────────────────────
-  useEffect(() => {
-    if (!backendReady) return;
-
-    let cancelled = false;
-
-    (async () => {
-      // Start from page INITIAL_PAGES + 1
-      let page = INITIAL_PAGES + 1;
-      while (!cancelled && page <= STREAM_LIMIT) {
-        const data = await fetchMlCatalog({ page, limit: PAGE_SIZE, sortBy: "popularity" });
-        if (!data || !data.results.length) break;
-        if (!cancelled) mergeInto(data.results);
-        if (page >= data.totalPages) break;
-        page++;
-        // Small yield so we don't hammer the backend
-        await new Promise((r) => setTimeout(r, 50));
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [backendReady, mergeInto]);
-
-  // ── On-demand: fetch a single movie by ID ───────────────────────────────
+  // ── On-demand: fetch a single movie by ID with memory cache ─────────────
   const fetchMovieById = useCallback(
     async (id) => {
       if (!id) return null;
-      const existing = movieMap.current.get(String(id));
+      const key = String(id);
+      const existing = movieMap.current.get(key);
       // Return early if we already have a real overview
       if (
         existing &&
@@ -147,8 +121,7 @@ export function MovieProvider({ children }) {
         const details = await fetchMlMovieById(id);
         if (details) {
           const merged = { ...(existing || {}), ...details };
-          movieMap.current.set(String(id), merged);
-          setMovies(Array.from(movieMap.current.values()));
+          movieMap.current.set(key, merged);
           return merged;
         }
       } catch {
@@ -185,16 +158,28 @@ export function MovieProvider({ children }) {
     return local;
   }, []);
 
+  // Compute genre counts in a single O(N) pass instead of 19 full-array scans
+  const genreCounts = useMemo(() => {
+    const counts = {};
+    for (const m of movies) {
+      if (Array.isArray(m.genres)) {
+        for (const g of m.genres) {
+          counts[g] = (counts[g] || 0) + 1;
+        }
+      }
+    }
+    return GENRE_NAMES.map((genre) => ({
+      genre,
+      count: counts[genre] || 0,
+    }));
+  }, [movies]);
+
   // ── Context value ────────────────────────────────────────────────────────
   const value = useMemo(() => {
     const movieList = movies;
     const getById = (id) => movieMap.current.get(String(id)) || null;
     const byGenre = (genre) =>
       movieList.filter((m) => Array.isArray(m.genres) && m.genres.includes(genre));
-    const genreCounts = GENRE_NAMES.map((genre) => ({
-      genre,
-      count: movieList.filter((m) => Array.isArray(m.genres) && m.genres.includes(genre)).length,
-    }));
 
     return {
       movies: movieList,
@@ -209,7 +194,7 @@ export function MovieProvider({ children }) {
       genreCounts,
       searchCatalog,
     };
-  }, [movies, loading, backendReady, totalCount, error, loadInitialPages, fetchMovieById, searchCatalog]);
+  }, [movies, loading, backendReady, totalCount, error, loadInitialPages, fetchMovieById, searchCatalog, genreCounts]);
 
   return <MovieContext.Provider value={value}>{children}</MovieContext.Provider>;
 }

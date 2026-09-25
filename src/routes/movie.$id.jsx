@@ -8,6 +8,7 @@ import MovieRow from "../components/MovieRow";
 import EmptyState from "../components/EmptyState";
 import { DetailsSkeleton } from "../components/LoadingSpinner";
 import { backdropFor } from "../data/backdrops";
+import { MOVIES } from "../data/movies";
 import { useMovies } from "../context/MovieContext";
 import { useUser } from "../context/UserContext";
 import { similarMovies } from "../utils/recommendationEngine";
@@ -50,11 +51,14 @@ function MovieDetails() {
   } = useUser();
 
   const localMovie = useMemo(
-    () => movies.find((item) => String(item.id) === String(id)) || null,
+    () =>
+      movies.find((item) => String(item.id) === String(id)) ||
+      MOVIES.find((item) => String(item.id) === String(id)) ||
+      null,
     [movies, id],
   );
 
-  // If movie is not in current in-memory list or lacks synopsis, fetch from full dataset / backend
+  // If movie is not in current in-memory list or lacks synopsis, fetch from backend in background
   useEffect(() => {
     let active = true;
     if (!localMovie || !localMovie.overview || localMovie.overview.startsWith("Explore full details")) {
@@ -72,7 +76,7 @@ function MovieDetails() {
     };
   }, [id, localMovie, fetchMovieById]);
 
-  const movie = localMovie || fetchedMovie;
+  const movie = fetchedMovie || localMovie;
 
   useEffect(() => {
     // Only track viewing if movie exists and is not already full watched
@@ -112,7 +116,7 @@ function MovieDetails() {
     };
   }, [movie?.title]);
 
-  if (loading || fetchingMovie) return <DetailsSkeleton />;
+  if (!movie && (loading || fetchingMovie)) return <DetailsSkeleton />;
 
   if (error || !movie) {
     return (
