@@ -107,7 +107,7 @@ function Home() {
         recent,
         watched,
         preferences,
-        limit: 14,
+        limit: 15,
       }),
     [movies, favorites, watchlist, recent, watched, preferences],
   );
