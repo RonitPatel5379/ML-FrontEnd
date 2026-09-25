@@ -13,7 +13,6 @@ import { MOVIES } from "../data/movies";
 import { INDIAN_MOVIES } from "../data/indianMovies";
 import { isIndianMovie } from "../data/genres";
 import { recommendMovies } from "../utils/recommendationEngine";
-import { getRankedTrendingMovies } from "../utils/trending";
 import { seeded } from "../utils/helpers";
 import { fetchMlRecommendations, fetchIndianHeroMovies } from "../services/mlApi";
 
@@ -35,12 +34,6 @@ export const Route = createFileRoute("/")({
   }),
   component: Home,
 });
-
-const CATEGORY_ROWS = [
-  { title: "Action & Adventure", genres: ["Action", "Adventure"] },
-  { title: "Comedy", genres: ["Comedy"] },
-  { title: "Romance", genres: ["Romance"] },
-];
 
 function Home() {
   const { movies, loading, error, reload, backendReady } = useMovies();
@@ -219,40 +212,8 @@ function Home() {
 
   const isFromBackend = backendRecommendations.length > 0;
 
-  const trendingToday = useMemo(
-    () => getRankedTrendingMovies(movies, "today").slice(0, 14),
-    [movies],
-  );
-
-  const trendingThisWeek = useMemo(
-    () => getRankedTrendingMovies(movies, "week").slice(0, 14),
-    [movies],
-  );
-
   const popularMovies = useMemo(
     () => [...movies].sort((a, b) => b.popularity - a.popularity).slice(4, 18),
-    [movies],
-  );
-
-  const topRatedMovies = useMemo(() => {
-    const indianList = (movies || []).filter(isIndianMovie);
-    const pool = indianList.length >= 10 ? indianList : INDIAN_MOVIES;
-    return [...pool].sort((a, b) => b.rating - a.rating).slice(0, 14);
-  }, [movies]);
-
-  const newReleasesMovies = useMemo(
-    () => [...movies].sort((a, b) => b.year - a.year).slice(0, 14),
-    [movies],
-  );
-
-  const categoryRows = useMemo(
-    () =>
-      CATEGORY_ROWS.map((row) => ({
-        title: row.title,
-        movies: movies
-          .filter((movie) => Array.isArray(movie.genres) && movie.genres.some((g) => row.genres.includes(g)))
-          .slice(0, 14),
-      })),
     [movies],
   );
 
@@ -340,14 +301,6 @@ function Home() {
       {loading && !featured.length ? <HeroSkeleton /> : <Hero movies={featured} />}
 
       <div className="relative z-10 -mt-10 space-y-2 pb-10">
-        <MovieRow
-          title="Trending Today"
-          subtitle="Updated today · What viewers are watching right now"
-          movies={trendingToday}
-          loading={loading}
-          seeAllTo="/trending"
-        />
-
         {continueWatching.length > 0 && (
           <MovieRow
             title="Continue Watching"
@@ -440,33 +393,6 @@ function Home() {
           movies={popularMovies}
           loading={loading && !popularMovies.length}
         />
-        <MovieRow
-          title="Top Rated"
-          movies={topRatedMovies}
-          loading={loading && !topRatedMovies.length}
-        />
-        <MovieRow
-          title="New Releases"
-          movies={newReleasesMovies}
-          loading={loading && !newReleasesMovies.length}
-        />
-        <MovieRow
-          title="Trending This Week"
-          subtitle="Top charts updated weekly"
-          movies={trendingThisWeek}
-          loading={loading && !trendingThisWeek.length}
-          showRank
-          seeAllTo="/trending"
-        />
-
-        {categoryRows.map((row) => (
-          <MovieRow
-            key={row.title}
-            title={row.title}
-            movies={row.movies}
-            loading={loading && !row.movies.length}
-          />
-        ))}
       </div>
     </div>
   );
