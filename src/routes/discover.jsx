@@ -8,6 +8,7 @@ import MovieGrid from "../components/MovieGrid";
 import ErrorState from "../components/ErrorState";
 import { useMovies } from "../context/MovieContext";
 import { fetchMlCatalog } from "../services/mlApi";
+import { DISCOVER_ALLOWED_GENRES, isDiscoverAllowedMovie } from "../data/genres";
 
 export const Route = createFileRoute("/discover")({
   head: () => ({
@@ -16,12 +17,12 @@ export const Route = createFileRoute("/discover")({
       {
         name: "description",
         content:
-          "Search by title, actor, director or genre and filter by year, rating, language and runtime.",
+          "Explore curated Action, Romance, Drama, Documentary, and Comedy movies on CineVerse. Filter by genre, year, rating, and language.",
       },
       { property: "og:title", content: "Discover Movies — CineVerse" },
       {
         property: "og:description",
-        content: "A powerful movie discovery interface with rich filters and sorting.",
+        content: "Discover Action, Romance, Drama, Documentary, and Comedy movies with rich filters and sorting.",
       },
     ],
   }),
@@ -37,7 +38,7 @@ const SORT_MAP = {
 };
 
 function Discover() {
-  const { movies: contextMovies, loading: ctxLoading, error, reload, totalCount } = useMovies();
+  const { movies: contextMovies, loading: ctxLoading, error, reload } = useMovies();
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
 
@@ -49,19 +50,30 @@ function Discover() {
   const [backendLoading, setBackendLoading] = useState(false);
   const loadMoreRef = useRef(null);
 
-  // Sync URL search params on mount
+  // Sync URL search params on mount (strictly allow only permitted Discover genres)
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const urlQuery = params.get("q") || params.get("search");
       const urlGenre = params.get("genre");
       if (urlQuery) setQuery(urlQuery);
-      if (urlGenre) setFilters((prev) => ({ ...prev, genre: urlGenre }));
+      if (
+        urlGenre &&
+        DISCOVER_ALLOWED_GENRES.some((g) => g.toLowerCase() === urlGenre.toLowerCase())
+      ) {
+        const canonical = DISCOVER_ALLOWED_GENRES.find(
+          (g) => g.toLowerCase() === urlGenre.toLowerCase(),
+        );
+        setFilters((prev) => ({ ...prev, genre: canonical }));
+      }
     }
   }, []);
 
   // ── Backend sort parameter ───────────────────────────────────────────────
-  const backendSort = useMemo(() => SORT_MAP[filters.sortBy] || "popularity", [filters.sortBy]);
+  const backendSort = useMemo(
+    () => SORT_MAP[filters.sort || filters.sortBy] || "popularity",
+    [filters.sort, filters.sortBy],
+  );
 
   // ── Fetch a specific backend page ────────────────────────────────────────
   const fetchBackendPage = useCallback(
@@ -79,12 +91,32 @@ function Discover() {
           language: filters.language || "",
         });
         if (!data) return;
+        // Strictly only allow Action, Romance, Drama, Documentary, and Comedy in Discover section
+        const allowedOnly = (data.results || []).filter(isDiscoverAllowedMovie);
         setBackendTotal(data.total);
         setBackendTotalPages(data.totalPages);
         setBackendMovies((prev) =>
-          page === 1 ? data.results : [...prev, ...data.results],
+          page === 1 ? allowedOnly : [...prev, ...allowedOnly],
         );
         setBackendPage(page);
+
+        // If filtering leaves fewer than 24 items on page 1, fetch page 2 to keep initial view lush
+        if (page === 1 && allowedOnly.length < 24 && data.totalPages > 1) {
+          const nextData = await fetchMlCatalog({
+            page: 2,
+            limit: 48,
+            genre: filters.genre || "",
+            sortBy: backendSort,
+            search: query.trim(),
+            minRating: Number(filters.minRating) || 0,
+            language: filters.language || "",
+          });
+          if (nextData) {
+            const nextAllowed = (nextData.results || []).filter(isDiscoverAllowedMovie);
+            setBackendMovies((prev) => [...prev, ...nextAllowed]);
+            setBackendPage(2);
+          }
+        }
       } finally {
         setBackendLoading(false);
       }
@@ -124,17 +156,20 @@ function Discover() {
   }, [backendLoading, backendPage, backendTotalPages, fetchBackendPage]);
 
   // ── Local filter (for quick client-side highlighting) ───────────────────
-  // We show backend results primarily. For instant local results while the
-  // backend loads, we also apply filters to the context catalog.
+  // Strictly filter context catalog to only Action, Romance, Drama, Documentary, Comedy
   const localResults = useMemo(
-    () => applyFilters(contextMovies, filters, query),
+    () => applyFilters(contextMovies, filters, query, DISCOVER_ALLOWED_GENRES),
     [contextMovies, filters, query],
   );
 
   // Decide what to show: backend paged results (primary) or local (fallback)
   const hasBackend = backendMovies.length > 0;
   const displayMovies = hasBackend ? backendMovies : localResults;
-  const displayTotal = hasBackend ? backendTotal : localResults.length;
+  const displayTotal = hasBackend
+    ? filters.genre || query.trim()
+      ? backendTotal
+      : Math.round(backendTotal * 0.8)
+    : localResults.length;
   const loading = ctxLoading && !hasBackend;
 
   const hasActiveFilters = useMemo(
@@ -149,7 +184,7 @@ function Discover() {
 
   const hiddenMatchesCount = useMemo(() => {
     if (!query.trim() || !hasActiveFilters || displayMovies.length > 0) return 0;
-    return applyFilters(contextMovies, DEFAULT_FILTERS, query).length;
+    return applyFilters(contextMovies, DEFAULT_FILTERS, query, DISCOVER_ALLOWED_GENRES).length;
   }, [contextMovies, query, hasActiveFilters, displayMovies.length]);
 
   const handleReset = () => {
@@ -162,7 +197,7 @@ function Discover() {
       <PageHeader
         eyebrow="Discover"
         title="Find exactly what you're in the mood for"
-        description={`Search ${totalCount.toLocaleString()} movies. Filter by genre, year, rating and language.`}
+        description="Explore Action, Romance, Drama, Documentary, and Comedy movies. Filter by genre, year, rating, and language."
       >
         <div className="glass flex items-center gap-3 rounded-full px-5 py-3">
           <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -198,6 +233,7 @@ function Discover() {
               onChange={setFilters}
               onReset={handleReset}
               resultCount={displayTotal}
+              allowedGenres={DISCOVER_ALLOWED_GENRES}
             />
 
             {hiddenMatchesCount > 0 && (
@@ -238,7 +274,7 @@ function Discover() {
               )}
               {!backendLoading && backendPage > 0 && backendPage >= backendTotalPages && displayMovies.length > 0 && (
                 <p className="text-xs text-muted-foreground">
-                  Showing all {displayTotal.toLocaleString()} movies
+                  Showing all {displayMovies.length.toLocaleString()} movies
                 </p>
               )}
             </div>

@@ -17,6 +17,30 @@ export const GENRES = [
 
 export const GENRE_NAMES = GENRES.map((g) => g.name);
 
+/**
+ * Curated genres strictly displayed in the Discover section.
+ * Only movies having at least one of these genres will appear in Discover.
+ */
+export const DISCOVER_ALLOWED_GENRES = [
+  "Action",
+  "Romance",
+  "Drama",
+  "Documentary",
+  "Comedy",
+];
+
+const DISCOVER_ALLOWED_SET = new Set(
+  DISCOVER_ALLOWED_GENRES.map((g) => g.toLowerCase()),
+);
+
+/**
+ * Checks whether a movie contains at least one of the 5 allowed Discover genres.
+ */
+export function isDiscoverAllowedMovie(movie) {
+  if (!movie || !Array.isArray(movie.genres)) return false;
+  return movie.genres.some((g) => DISCOVER_ALLOWED_SET.has(String(g).trim().toLowerCase()));
+}
+
 export const LANGUAGES = [
   "English",
   "Hindi",

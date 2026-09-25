@@ -14,8 +14,15 @@ const SORTS = [
 const selectClass =
   "w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm outline-none focus:border-primary";
 
-export default function FilterBar({ filters, onChange, onReset, resultCount }) {
+export default function FilterBar({
+  filters,
+  onChange,
+  onReset,
+  resultCount,
+  allowedGenres,
+}) {
   const set = (key) => (event) => onChange({ ...filters, [key]: event.target.value });
+  const genreList = Array.isArray(allowedGenres) && allowedGenres.length > 0 ? allowedGenres : GENRE_NAMES;
 
   return (
     <div className="glass card-elevated rounded-3xl p-5 sm:p-6">
@@ -25,7 +32,9 @@ export default function FilterBar({ filters, onChange, onReset, resultCount }) {
           Refine
         </h2>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-muted-foreground">{resultCount} titles</span>
+          <span className="text-xs text-muted-foreground">
+            {typeof resultCount === "number" ? resultCount.toLocaleString() : resultCount} titles
+          </span>
           <button
             type="button"
             onClick={onReset}
@@ -41,7 +50,7 @@ export default function FilterBar({ filters, onChange, onReset, resultCount }) {
           <span className="mb-1.5 block text-xs text-muted-foreground">Genre</span>
           <select className={selectClass} value={filters.genre} onChange={set("genre")}>
             <option value="">All genres</option>
-            {GENRE_NAMES.map((genre) => (
+            {genreList.map((genre) => (
               <option key={genre} value={genre}>
                 {genre}
               </option>
@@ -130,16 +139,36 @@ export const DEFAULT_FILTERS = {
 };
 
 /** Pure filter + sort pipeline so the page component stays presentational. */
-export function applyFilters(movies, filters, query = "") {
+export function applyFilters(movies, filters, query = "", allowedGenres = null) {
   if (!Array.isArray(movies)) return [];
   const q = (query || "").trim();
+  const allowedSet =
+    Array.isArray(allowedGenres) && allowedGenres.length > 0
+      ? new Set(allowedGenres.map((g) => g.toLowerCase()))
+      : null;
 
   const filtered = movies.filter((movie) => {
+    // 0. Enforce allowed genres (e.g. Discover section limited to Action, Romance, Drama, Doc, Comedy)
+    if (allowedSet) {
+      if (
+        !Array.isArray(movie.genres) ||
+        !movie.genres.some((g) => allowedSet.has(String(g).trim().toLowerCase()))
+      ) {
+        return false;
+      }
+    }
+
     // 1. Search Query Match
     if (q && !matchesQuery(movie, q)) return false;
 
     // 2. Genre Filter
-    if (filters.genre && !(Array.isArray(movie.genres) && movie.genres.includes(filters.genre))) {
+    if (
+      filters.genre &&
+      !(
+        Array.isArray(movie.genres) &&
+        movie.genres.some((g) => g.toLowerCase() === filters.genre.toLowerCase())
+      )
+    ) {
       return false;
     }
 
