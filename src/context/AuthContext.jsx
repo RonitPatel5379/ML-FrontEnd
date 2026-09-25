@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
+import { ensureLiveApiConnected } from "@/services/mlApi";
 
 const AuthContext = createContext(null);
 const AUTH_TIMEOUT_MS = 12000;
@@ -110,6 +111,7 @@ export function AuthProvider({ children }) {
     setUser(createUser(authUser));
     setReady(true);
     syncCookie(true);
+    void ensureLiveApiConnected();
     void getProfileUser(authUser)
       .then((profileUser) => {
         if (profileRequest.current === requestId) setUser(profileUser);
@@ -120,6 +122,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   useEffect(() => {
+    void ensureLiveApiConnected();
     // Immediately fetch session to ensure token freshness
     supabase.auth
       .getSession()
@@ -173,6 +176,7 @@ export function AuthProvider({ children }) {
   }, [applyUser]);
 
   const login = useCallback(async ({ email, password }) => {
+    void ensureLiveApiConnected();
     const { data, error } = await withTimeout(
       supabase.auth.signInWithPassword({
         email: String(email).trim().toLowerCase(),
@@ -189,6 +193,7 @@ export function AuthProvider({ children }) {
   }, [applyUser]);
 
   const loginAsDemo = useCallback(async () => {
+    void ensureLiveApiConnected();
     return await login({ email: "demo@cineverse.app", password: "Cineverse123!" });
   }, [login]);
 

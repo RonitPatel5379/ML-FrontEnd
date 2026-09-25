@@ -23,8 +23,15 @@ export const API_CONFIG = {
     welcome: (name) => `/welcome/${encodeURIComponent(name)}`,
   },
 
-  // Request timeout in milliseconds
-  timeoutMs: 8000,
+  // Request timeout in milliseconds (increased to 30000 to absorb Render cold boot)
+  timeoutMs: 30000,
+
+  // Fast probe timeout for routine health pings
+  warmProbeTimeoutMs: 8000,
+
+  // Keep-alive heartbeat interval (every 4 minutes).
+  // Render spins down free containers after 15 min idle; 4 min pings ensure it never sleeps.
+  heartbeatIntervalMs: 4 * 60 * 1000,
 };
 
 export default API_CONFIG;

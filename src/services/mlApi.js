@@ -105,6 +105,143 @@ export function normalizeMlMovie(raw, idx = 0) {
   };
 }
 
+// ─── Connection & Keep-Alive State ──────────────────────────────────────────
+let backendOnline = false;
+let isWarmingUp = false;
+let heartbeatTimer = null;
+let lastSuccessfulPing = 0;
+const statusListeners = new Set();
+
+export function isBackendOnline() {
+  return backendOnline;
+}
+
+export function subscribeBackendStatus(listener) {
+  statusListeners.add(listener);
+  try {
+    listener({ online: backendOnline, lastPing: lastSuccessfulPing, warmingUp: isWarmingUp });
+  } catch {}
+  return () => statusListeners.delete(listener);
+}
+
+function notifyStatus() {
+  const state = { online: backendOnline, lastPing: lastSuccessfulPing, warmingUp: isWarmingUp };
+  statusListeners.forEach((l) => {
+    try {
+      l(state);
+    } catch (e) {
+      console.warn("[ML API] Status listener error:", e);
+    }
+  });
+}
+
+/**
+ * Starts a 4-minute recurring heartbeat ping.
+ * Prevents Render from spinning down free containers due to inactivity.
+ */
+export function startBackendHeartbeat() {
+  if (typeof window === "undefined") return;
+  if (heartbeatTimer) return; // already active
+
+  const ping = async () => {
+    try {
+      const { signal, clear } = makeController(API_CONFIG.warmProbeTimeoutMs || 8000);
+      const res = await fetch(`${API_CONFIG.backendUrl}${API_CONFIG.endpoints.health}`, {
+        signal,
+        cache: "no-store",
+      });
+      clear();
+      if (res.ok) {
+        backendOnline = true;
+        lastSuccessfulPing = Date.now();
+        notifyStatus();
+      } else {
+        void warmupBackend(2);
+      }
+    } catch {
+      void warmupBackend(2);
+    }
+  };
+
+  heartbeatTimer = setInterval(ping, API_CONFIG.heartbeatIntervalMs || 240000);
+
+  // Ping immediately when window regains focus if > 2 minutes since last ping
+  const handleVisibility = () => {
+    if (document.visibilityState === "visible") {
+      const elapsed = Date.now() - lastSuccessfulPing;
+      if (elapsed > 2 * 60 * 1000) {
+        void ping();
+      }
+    }
+  };
+
+  window.addEventListener("visibilitychange", handleVisibility);
+  window.addEventListener("focus", handleVisibility);
+}
+
+/**
+ * Proactively wakes up the Render backend container.
+ * Uses generous timeouts and retries so cold-starts connect automatically
+ * without requiring the user to reload 2-3 times.
+ */
+export async function warmupBackend(maxRetries = 3) {
+  if (isWarmingUp) return backendOnline;
+  isWarmingUp = true;
+  notifyStatus();
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const timeout = attempt === 1 ? 30000 : 25000;
+    const { signal, clear } = makeController(timeout);
+    try {
+      const response = await fetch(`${API_CONFIG.backendUrl}${API_CONFIG.endpoints.health}`, {
+        signal,
+        cache: "no-store",
+      });
+      if (response.ok) {
+        backendOnline = true;
+        lastSuccessfulPing = Date.now();
+        isWarmingUp = false;
+        notifyStatus();
+        startBackendHeartbeat();
+        clear();
+        return true;
+      }
+    } catch (err) {
+      console.warn(`[ML API] Warmup attempt ${attempt}/${maxRetries} waiting for container:`, err?.message);
+    } finally {
+      clear();
+    }
+
+    if (attempt < maxRetries) {
+      await new Promise((resolve) => setTimeout(resolve, attempt * 2000));
+    }
+  }
+
+  isWarmingUp = false;
+  notifyStatus();
+  return backendOnline;
+}
+
+/**
+ * Called immediately upon login or app launch to guarantee the live API is connected
+ * and remains connected with an active heartbeat.
+ */
+export async function ensureLiveApiConnected() {
+  startBackendHeartbeat();
+  if (!backendOnline && !isWarmingUp) {
+    return await warmupBackend(3);
+  }
+  return backendOnline;
+}
+
+// Auto-start heartbeat and background warmup as soon as script loads in browser
+if (typeof window !== "undefined") {
+  setTimeout(() => {
+    startBackendHeartbeat();
+    void warmupBackend(2);
+  }, 100);
+}
+
 // ─── API helpers ─────────────────────────────────────────────────────────────
 
 function makeController(ms = API_CONFIG.timeoutMs) {
@@ -160,6 +297,9 @@ export async function fetchMlCatalog({
       results: (data.results || []).map((m, i) => normalizeMlMovie(m, i)),
     };
     catalogCache.set(cacheKey, result);
+    backendOnline = true;
+    lastSuccessfulPing = Date.now();
+    notifyStatus();
     return result;
   } catch {
     return null;
@@ -328,12 +468,15 @@ export async function fetchMlRecommendations(movieTitle, n = 12, localMovies = [
  * @returns {Promise<{ online: boolean, modelReady: boolean, totalMovies: number }>}
  */
 export async function checkBackendHealth() {
-  const { signal, clear } = makeController(6000);
+  const { signal, clear } = makeController(API_CONFIG.warmProbeTimeoutMs || 8000);
   try {
     const url = `${API_CONFIG.backendUrl}${API_CONFIG.endpoints.health}`;
-    const response = await fetch(url, { signal });
+    const response = await fetch(url, { signal, cache: "no-store" });
     if (!response.ok) return { online: false, modelReady: false, totalMovies: 0 };
     const data = await response.json();
+    backendOnline = true;
+    lastSuccessfulPing = Date.now();
+    notifyStatus();
     return {
       online: true,
       modelReady: Boolean(data?.model_loaded),

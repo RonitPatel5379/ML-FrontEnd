@@ -24,7 +24,15 @@ import {
 
 import { MOVIES } from "../data/movies";
 import { GENRE_NAMES } from "../data/genres";
-import { normalizeMlMovie, fetchMlMovieById, fetchMlCatalog, searchMlMovies } from "../services/mlApi";
+import {
+  normalizeMlMovie,
+  fetchMlMovieById,
+  fetchMlCatalog,
+  searchMlMovies,
+  ensureLiveApiConnected,
+  subscribeBackendStatus,
+  warmupBackend,
+} from "../services/mlApi";
 import { matchesQuery } from "../utils/helpers";
 
 const MovieContext = createContext(null);
@@ -70,12 +78,20 @@ export function MovieProvider({ children }) {
   }, []);
 
   // ── Load initial top popular pages smoothly without blocking ────────────
-  const loadInitialPages = useCallback(async () => {
+  const loadInitialPages = useCallback(async (retryCount = 0) => {
     setLoading(true);
     setError(null);
     try {
       const first = await fetchMlCatalog({ page: 1, limit: PAGE_SIZE, sortBy: "popularity" });
-      if (!first) throw new Error("Backend unreachable — showing local catalog.");
+      if (!first) {
+        if (retryCount < 3) {
+          // If initial load returned null because Render container is cold-booting, warm up and retry
+          void warmupBackend(1);
+          await new Promise((r) => setTimeout(r, 2000));
+          return await loadInitialPages(retryCount + 1);
+        }
+        throw new Error("Backend unreachable — showing local catalog.");
+      }
 
       setTotalCount(first.total);
       mergeInto(first.results);
@@ -98,8 +114,20 @@ export function MovieProvider({ children }) {
     }
   }, [mergeInto]);
 
+  const backendReadyRef = useRef(backendReady);
+  backendReadyRef.current = backendReady;
+
   useEffect(() => {
+    void ensureLiveApiConnected();
     loadInitialPages();
+
+    // Subscribe to backend status: if backend turns online, automatically load catalog
+    const unsubscribe = subscribeBackendStatus(({ online }) => {
+      if (online && !backendReadyRef.current) {
+        loadInitialPages();
+      }
+    });
+    return () => unsubscribe();
   }, [loadInitialPages]);
 
   // ── On-demand: fetch a single movie by ID with memory cache ─────────────

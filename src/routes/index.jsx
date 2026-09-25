@@ -43,7 +43,7 @@ const CATEGORY_ROWS = [
 ];
 
 function Home() {
-  const { movies, loading, error, reload } = useMovies();
+  const { movies, loading, error, reload, backendReady } = useMovies();
   const { favorites, watchlist, recent, watched, preferences } = useUser();
 
   const featured = useMemo(() => {
@@ -118,14 +118,24 @@ function Home() {
     return null;
   }, [recent, watched, favorites]);
 
-  // Resolve movie title stably
+  // Resolve movie title stably for live ML model recommendations
   const activeMovieTitle = useMemo(() => {
-    if (!activeMovieId) return "";
+    if (!activeMovieId) {
+      // If user hasn't watched anything yet, use their favorite or default seed title ("Inception")
+      // so the live ML API is immediately queried upon login
+      if (favorites?.length) {
+        const favId = favorites[0];
+        const match = movies.find((m) => String(m.id) === String(favId));
+        if (match?.title) return match.title;
+      }
+      const match = movies.find((m) => m.title?.toLowerCase().includes("inception")) || movies[0];
+      return match?.title || "Inception";
+    }
     const fromLoaded = movies.find((m) => String(m.id) === String(activeMovieId));
     if (fromLoaded?.title) return fromLoaded.title;
     const fromCurated = MOVIES.find((m) => String(m.id) === String(activeMovieId));
-    return fromCurated?.title || "";
-  }, [activeMovieId, movies]);
+    return fromCurated?.title || "Inception";
+  }, [activeMovieId, favorites, movies]);
 
   const lastQueriedTitleRef = useRef("");
   const moviesRef = useRef(movies);
@@ -139,8 +149,8 @@ function Home() {
       return;
     }
 
-    // If we have already queried for this exact movie title, avoid redundant network requests
-    if (lastQueriedTitleRef.current === activeMovieTitle) {
+    // If we have already queried for this exact movie title and have results, avoid redundant network requests
+    if (lastQueriedTitleRef.current === activeMovieTitle && backendRecommendations.length > 0) {
       return;
     }
 
@@ -167,7 +177,7 @@ function Home() {
     return () => {
       isSubscribed = false;
     };
-  }, [activeMovieTitle]);
+  }, [activeMovieTitle, backendReady, backendRecommendations.length]);
 
   const isFromBackend = backendRecommendations.length > 0;
 
@@ -318,7 +328,7 @@ function Home() {
                     <Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
                     {isFromBackend ? "Render ML Backend Active" : "Recommended For You"}
                   </p>
-                  {isFromBackend && (
+                  {(isFromBackend || backendReady) && (
                     <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-400 border border-emerald-500/20">
                       Live API Connected
                     </span>
@@ -326,7 +336,7 @@ function Home() {
                 </div>
                 <h2 className="mt-2 font-display text-2xl font-bold sm:text-3xl">
                   {isFromBackend
-                    ? `Top Picks Based on "${sourceMovieTitle}"`
+                    ? (activeMovieId ? `Top Picks Based on "${sourceMovieTitle}"` : `Top Live ML Picks Based on "${sourceMovieTitle}"`)
                     : recommendationSubtitle}
                 </h2>
                 <p className="mt-2 max-w-xl text-sm text-muted-foreground">
@@ -355,7 +365,7 @@ function Home() {
           }
           title={
             isFromBackend
-              ? `Because you're watching "${sourceMovieTitle}"`
+              ? (activeMovieId ? `Because you're watching "${sourceMovieTitle}"` : `Recommended By Live ML Model ("${sourceMovieTitle}")`)
               : "Because your taste says so"
           }
           subtitle={

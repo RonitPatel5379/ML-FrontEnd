@@ -5,6 +5,7 @@ import { Clapperboard, Lock, Mail } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "../context/AuthContext";
+import { ensureLiveApiConnected } from "../services/mlApi";
 import backdrop from "../assets/backdrop-neon.jpg";
 
 export const Route = createFileRoute("/login")({
@@ -30,6 +31,11 @@ function Login() {
   const navigate = useNavigate();
   const [form, setForm] = useState({ email: "", password: "", remember: false });
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    // Proactively pre-warm live ML backend container while user is on login page
+    void ensureLiveApiConnected();
+  }, []);
 
   // If already signed in, immediately redirect to Home
   useEffect(() => {
