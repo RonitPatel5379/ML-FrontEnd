@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Link } from "@tanstack/react-router";
 import { AnimatePresence, motion } from "framer-motion";
-import { Bookmark, BookmarkCheck, Info, Play, Star } from "lucide-react";
+import { Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, Info, Play, Sparkles, Star } from "lucide-react";
 
 import Poster from "./Poster";
 import { backdropFor } from "../data/backdrops";
@@ -10,20 +10,38 @@ import { useUser } from "../context/UserContext";
 
 export default function Hero({ movies = [], interval = 7000 }) {
   const [index, setIndex] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
   const { inWatchlist, toggleWatchlist } = useUser();
 
-  useEffect(() => {
-    if (movies.length < 2) return undefined;
-    const timer = setInterval(() => setIndex((i) => (i + 1) % movies.length), interval);
-    return () => clearInterval(timer);
-  }, [movies.length, interval]);
+  const nextMovie = useCallback(() => {
+    if (movies.length > 1) {
+      setIndex((i) => (i + 1) % movies.length);
+    }
+  }, [movies.length]);
 
-  const movie = movies[index];
+  const prevMovie = useCallback(() => {
+    if (movies.length > 1) {
+      setIndex((i) => (i - 1 + movies.length) % movies.length);
+    }
+  }, [movies.length]);
+
+  useEffect(() => {
+    if (movies.length < 2 || isPaused) return undefined;
+    const timer = setInterval(nextMovie, interval);
+    return () => clearInterval(timer);
+  }, [movies.length, interval, isPaused, nextMovie]);
+
+  const activeIndex = movies.length > 0 ? index % movies.length : 0;
+  const movie = movies[activeIndex];
   if (!movie) return null;
   const saved = inWatchlist(movie.id);
 
   return (
-    <section className="relative h-[86vh] min-h-[560px] w-full overflow-hidden">
+    <section
+      onMouseEnter={() => setIsPaused(true)}
+      onMouseLeave={() => setIsPaused(false)}
+      className="relative h-[86vh] min-h-[560px] w-full overflow-hidden"
+    >
       <AnimatePresence mode="sync">
         <motion.img
           key={movie.id}
@@ -40,6 +58,28 @@ export default function Hero({ movies = [], interval = 7000 }) {
       </AnimatePresence>
       <div className="hero-scrim absolute inset-0" />
       <div className="absolute inset-0 bg-gradient-to-r from-background/85 via-background/30 to-transparent" />
+
+      {/* Navigation Arrows for manual rotation */}
+      {movies.length > 1 && (
+        <>
+          <button
+            type="button"
+            onClick={prevMovie}
+            aria-label="Previous Indian movie"
+            className="absolute left-3 top-1/2 z-20 -translate-y-1/2 rounded-full border border-white/10 bg-black/40 p-2 text-white/80 backdrop-blur-md transition-all hover:scale-105 hover:bg-black/70 hover:text-white sm:left-6 sm:p-3"
+          >
+            <ChevronLeft className="h-5 w-5 sm:h-6 sm:w-6" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            onClick={nextMovie}
+            aria-label="Next Indian movie"
+            className="absolute right-3 top-1/2 z-20 -translate-y-1/2 rounded-full border border-white/10 bg-black/40 p-2 text-white/80 backdrop-blur-md transition-all hover:scale-105 hover:bg-black/70 hover:text-white sm:right-6 sm:p-3"
+          >
+            <ChevronRight className="h-5 w-5 sm:h-6 sm:w-6" aria-hidden="true" />
+          </button>
+        </>
+      )}
 
       <div className="relative z-10 mx-auto flex h-full max-w-7xl items-end px-4 pb-16 sm:px-8 sm:pb-24">
         <AnimatePresence mode="wait">
@@ -59,7 +99,8 @@ export default function Hero({ movies = [], interval = 7000 }) {
 
             <div className="max-w-2xl">
               <p className="mb-3 inline-flex items-center gap-2 text-[11px] font-semibold tracking-[0.28em] text-primary-glow uppercase">
-                Featured tonight
+                <Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+                Featured Indian Cinema · {movie.language || "Indian"} Spotlight
               </p>
               <h1 className="font-display text-4xl leading-[1.05] font-black text-balance sm:text-6xl">
                 {movie.title}
@@ -124,9 +165,9 @@ export default function Hero({ movies = [], interval = 7000 }) {
             type="button"
             onClick={() => setIndex(dotIndex)}
             aria-label={`Show ${item.title}`}
-            aria-current={dotIndex === index}
+            aria-current={dotIndex === activeIndex}
             className={`h-1.5 rounded-full transition-all ${
-              dotIndex === index ? "w-8 bg-primary" : "w-3 bg-border hover:bg-muted-foreground"
+              dotIndex === activeIndex ? "w-8 bg-primary" : "w-3 bg-border hover:bg-muted-foreground"
             }`}
           />
         ))}

@@ -11,7 +11,12 @@
  */
 
 import { API_CONFIG } from "../config/api";
-import { normalizeLanguage } from "../data/genres";
+import {
+  normalizeLanguage,
+  isIndianMovie,
+  INDIAN_LANG_CODES,
+  INDIAN_LANG_SET,
+} from "../data/genres";
 
 // ─── Normalizer ──────────────────────────────────────────────────────────────
 
@@ -66,6 +71,15 @@ export function normalizeMlMovie(raw, idx = 0) {
   const rawLang = raw.original_language || raw.language || "en";
   const language = normalizeLanguage(rawLang);
 
+  const isIndian =
+    INDIAN_LANG_CODES.has(String(rawLang).toLowerCase()) ||
+    INDIAN_LANG_SET.has(String(language).toLowerCase()) ||
+    String(raw.region || "").toLowerCase() === "india" ||
+    String(raw.country || "").toLowerCase() === "india";
+
+  const backdropChoices = ["desert", "neon", "gothic", "space"];
+  const backdrop = raw.backdrop || backdropChoices[Math.abs(raw.id ?? idx) % backdropChoices.length];
+
   // ── Similarity badge (recommendations only) ─────────────────────────────
   const similarityText =
     raw.similarity != null ? `${raw.similarity}% Match` : undefined;
@@ -84,6 +98,9 @@ export function normalizeMlMovie(raw, idx = 0) {
     genres: genreArray,
     overview: raw.overview || "",
     language,
+    original_language: raw.original_language || rawLang,
+    region: isIndian ? "india" : raw.region,
+    country: isIndian ? "India" : raw.country,
     certification: raw.certification || "PG-13",
 
     // Popularity / engagement
@@ -97,7 +114,7 @@ export function normalizeMlMovie(raw, idx = 0) {
     // Visual
     remotePoster,
     hue: ((raw.id ?? idx) * 37) % 360,
-    backdrop: "neon",
+    backdrop,
 
     // Recommendation metadata (only set on /predict results)
     ...(similarityText !== undefined && { similarity: similarityText }),
@@ -506,3 +523,44 @@ export async function fetchMlGenres() {
     return [];
   }
 }
+
+/**
+ * Fetches popular, high-rated Indian movies across multiple Indian languages directly from the live Render API.
+ * Ensures the hero carousel always has real, fresh Indian cinema from the backend.
+ * @returns {Promise<Movie[]>}
+ */
+export async function fetchIndianHeroMovies({ limit = 15 } = {}) {
+  const INDIAN_LANGS = ["hi", "ta", "te", "ml", "kn"];
+  const cacheKey = `indian_hero_movies_pool_${limit}`;
+  if (catalogCache.has(cacheKey)) {
+    return catalogCache.get(cacheKey);
+  }
+
+  try {
+    const promises = INDIAN_LANGS.map((lang) =>
+      fetchMlCatalog({
+        language: lang,
+        sortBy: "popularity",
+        minRating: 6.8,
+        limit,
+      }),
+    );
+    const pages = await Promise.allSettled(promises);
+    const pool = [];
+    for (const res of pages) {
+      if (res.status === "fulfilled" && res.value?.results?.length) {
+        pool.push(...res.value.results);
+      }
+    }
+
+    const validIndian = pool.filter((m) => isIndianMovie(m));
+    if (validIndian.length > 0) {
+      catalogCache.set(cacheKey, validIndian);
+      return validIndian;
+    }
+  } catch (err) {
+    console.warn("[ML API] Failed to fetch Indian hero movies from API:", err);
+  }
+  return [];
+}
+

@@ -157,11 +157,11 @@ export const INDIAN_LANGUAGES = [
   "Assamese",
 ];
 
-const INDIAN_LANG_SET = new Set(
+export const INDIAN_LANG_SET = new Set(
   INDIAN_LANGUAGES.map((l) => l.toLowerCase()),
 );
 
-const INDIAN_LANG_CODES = new Set([
+export const INDIAN_LANG_CODES = new Set([
   "hi",
   "hin",
   "ta",

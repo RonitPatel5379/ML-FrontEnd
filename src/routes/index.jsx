@@ -15,7 +15,7 @@ import { isIndianMovie } from "../data/genres";
 import { recommendMovies } from "../utils/recommendationEngine";
 import { getRankedTrendingMovies } from "../utils/trending";
 import { seeded } from "../utils/helpers";
-import { fetchMlRecommendations } from "../services/mlApi";
+import { fetchMlRecommendations, fetchIndianHeroMovies } from "../services/mlApi";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -45,27 +45,65 @@ const CATEGORY_ROWS = [
 function Home() {
   const { movies, loading, error, reload, backendReady } = useMovies();
   const { favorites, watchlist, recent, watched, preferences } = useUser();
+  const [apiIndianMovies, setApiIndianMovies] = useState([]);
 
+  // Fetch real Indian movies from the live Render API
+  useEffect(() => {
+    let active = true;
+    fetchIndianHeroMovies({ limit: 15 }).then((items) => {
+      if (active && items && items.length > 0) {
+        setApiIndianMovies(items);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [backendReady]);
+
+  // Exactly 5 Indian movies rotated daily below the navbar in the Hero carousel
   const featured = useMemo(() => {
-    if (!movies.length) return [];
+    // Collect candidate pool prioritizing Indian movies directly from the live API
+    const apiPool = (apiIndianMovies || []).filter(isIndianMovie);
+    const contextPool = (movies || []).filter(isIndianMovie);
+    const fallbackPool = (INDIAN_MOVIES || []).filter(isIndianMovie);
 
+    // Merge: live API first, then context loaded movies, then curated Indian films
+    const candidateList = [...apiPool, ...contextPool, ...fallbackPool];
+
+    // Deduplicate by normalized title and guarantee EVERY movie is an Indian movie
+    const seen = new Set();
+    const indianPool = [];
+    for (const movie of candidateList) {
+      if (!isIndianMovie(movie)) continue;
+      const key = (movie.title || "").trim().toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        indianPool.push(movie);
+      }
+    }
+
+    if (indianPool.length === 0) return [];
+
+    // Unique deterministic seed for the current calendar day (changes every single day)
     const today = new Date();
-    // Unique deterministic seed for the current calendar day
     const daySeed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
 
-    // Pool of high-rated movies suitable for the hero banner
-    const highRated = movies.filter((movie) => movie.rating >= 7.8);
-    const pool = highRated.length >= 5 ? highRated : movies;
-
     // Score and shuffle deterministically for each day
-    const scored = pool.map((movie, index) => ({
-      movie,
-      score: seeded(daySeed + movie.id * 31 + index),
-    }));
+    const scored = indianPool.map((movie, index) => {
+      const idNum =
+        typeof movie.id === "number"
+          ? movie.id
+          : (movie.title || "").split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
+      return {
+        movie,
+        score: seeded(daySeed * 997 + idNum * 31 + index),
+      };
+    });
 
     scored.sort((a, b) => b.score - a.score);
+    // Strictly return the 5 Indian movies for today
     return scored.slice(0, 5).map((item) => item.movie);
-  }, [movies]);
+  }, [apiIndianMovies, movies]);
 
   const recommendations = useMemo(
     () =>
@@ -299,7 +337,7 @@ function Home() {
 
   return (
     <div>
-      {loading ? <HeroSkeleton /> : <Hero movies={featured} />}
+      {loading && !featured.length ? <HeroSkeleton /> : <Hero movies={featured} />}
 
       <div className="relative z-10 -mt-10 space-y-2 pb-10">
         <MovieRow
