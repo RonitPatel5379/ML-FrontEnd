@@ -343,7 +343,6 @@ function Home() {
         />
         <MovieRow
           title="Top Rated"
-          subtitle="Top rated Indian cinema masterpieces"
           movies={topRatedMovies}
           loading={loading && !topRatedMovies.length}
         />
