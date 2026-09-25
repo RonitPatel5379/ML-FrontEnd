@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Clapperboard } from "lucide-react";
 import { toast } from "sonner";
@@ -26,10 +26,17 @@ const inputClass =
   "w-full rounded-xl border border-border bg-surface px-3 py-3 text-sm outline-none focus:border-primary";
 
 function Register() {
-  const { register } = useAuth();
+  const { register, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState({ name: "", email: "", password: "", confirm: "" });
   const [busy, setBusy] = useState(false);
+
+  // If already signed in, immediately redirect to Home
+  useEffect(() => {
+    if (isAuthenticated) {
+      void navigate({ to: "/", replace: true });
+    }
+  }, [isAuthenticated, navigate]);
 
   const submit = async (event) => {
     event.preventDefault();
@@ -40,7 +47,10 @@ function Register() {
 
     setBusy(true);
     try {
-      await register({ name: form.name.trim(), email: form.email, password: form.password });
+      const data = await register({ name: form.name.trim(), email: form.email, password: form.password });
+      if (data?.session || data?.user) {
+        return navigate({ to: "/", replace: true });
+      }
       return navigate({ to: "/login", replace: true });
     } catch (error) {
       toast.error(error.message || "Could not create your account.");

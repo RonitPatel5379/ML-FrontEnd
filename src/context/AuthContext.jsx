@@ -48,6 +48,16 @@ async function getProfileUser(authUser) {
   return createUser(authUser, profile);
 }
 
+function syncCookie(hasSession) {
+  if (typeof document !== "undefined") {
+    if (hasSession) {
+      document.cookie = "cineverse_session=1; path=/; max-age=2592000; SameSite=Lax";
+    } else {
+      document.cookie = "cineverse_session=; path=/; max-age=0; SameSite=Lax";
+    }
+  }
+}
+
 function getStoredUser() {
   if (typeof window === "undefined") return null;
   try {
@@ -58,10 +68,14 @@ function getStoredUser() {
         if (raw) {
           const parsed = JSON.parse(raw);
           const authUser = parsed.user || parsed.currentSession?.user;
-          if (authUser) return createUser(authUser);
+          if (authUser) {
+            syncCookie(true);
+            return createUser(authUser);
+          }
         }
       }
     }
+    syncCookie(false);
   } catch {
     // Ignore error
   }
@@ -78,11 +92,13 @@ export function AuthProvider({ children }) {
     if (!authUser) {
       setUser(null);
       setReady(true);
+      syncCookie(false);
       return;
     }
 
     setUser(createUser(authUser));
     setReady(true);
+    syncCookie(true);
     void getProfileUser(authUser)
       .then((profileUser) => {
         if (profileRequest.current === requestId) setUser(profileUser);
@@ -129,12 +145,16 @@ export function AuthProvider({ children }) {
     );
     if (error) throw error;
 
-    // New accounts must always continue through the sign-in screen. Auto
-    // confirmation can return a session, so clear it before navigating.
-    if (data.session) {
-      await supabase.auth.signOut({ scope: "local" });
-      applyUser(null);
+    // If session or user is returned, keep user logged in immediately
+    if (data.session?.user || data.user) {
+      applyUser(data.session?.user || data.user);
+      syncCookie(true);
+      toast.success("Account created!", {
+        description: `Welcome to CineVerse, ${name || "Cinephile"}!`,
+      });
+      return data;
     }
+
     toast.success("Account created", {
       description: "Your account is ready. Sign in to continue.",
     });
@@ -152,16 +172,25 @@ export function AuthProvider({ children }) {
     if (error) throw error;
     const nextUser = createUser(data.user);
     applyUser(data.user);
+    syncCookie(true);
     toast.success(`Welcome back, ${nextUser?.name || "Cinephile"}`);
     return nextUser;
   }, [applyUser]);
 
+  const loginAsDemo = useCallback(async () => {
+    return await login({ email: "demo@cineverse.app", password: "Cineverse123!" });
+  }, [login]);
+
   const logout = useCallback(async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
-    setUser(null);
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      console.warn("Sign out warning:", e);
+    }
+    applyUser(null);
+    syncCookie(false);
     toast.message("Signed out");
-  }, []);
+  }, [applyUser]);
 
   const updateProfile = useCallback(
     async ({ name }) => {
@@ -179,8 +208,8 @@ export function AuthProvider({ children }) {
   );
 
   const value = useMemo(
-    () => ({ user, ready, isAuthenticated: !!user, login, register, logout, updateProfile }),
-    [user, ready, login, register, logout, updateProfile],
+    () => ({ user, ready, isAuthenticated: !!user, login, loginAsDemo, register, logout, updateProfile }),
+    [user, ready, login, loginAsDemo, register, logout, updateProfile],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

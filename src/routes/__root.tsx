@@ -8,6 +8,7 @@ import {
   Scripts,
   useRouterState,
   useNavigate,
+  Navigate,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 import { Toaster } from "sonner";
@@ -32,11 +33,7 @@ function NotFoundComponent() {
   }, [ready, isAuthenticated, navigate]);
 
   if (!isAuthenticated) {
-    return (
-      <div className="grid min-h-screen place-items-center bg-background px-4">
-        <LoadingSpinner label="Redirecting to sign in..." />
-      </div>
-    );
+    return <Navigate to="/login" replace />;
   }
 
   return (
@@ -161,11 +158,7 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <UserProvider>
-          <MovieProvider>
-            <AuthenticatedApp />
-          </MovieProvider>
-        </UserProvider>
+        <AuthenticatedApp />
       </AuthProvider>
     </QueryClientProvider>
   );
@@ -198,16 +191,11 @@ function AuthenticatedApp() {
     }
   }, [ready, isAuthenticated, isAuthPage, normalizedPath, navigate]);
 
-  // NEVER render protected content (Outlet, Navbar, Footer) if unauthenticated
-  if (!isAuthPage && !isAuthenticated) {
-    return (
-      <div className="grid min-h-screen place-items-center bg-background">
-        <LoadingSpinner label="Checking your session..." />
-      </div>
-    );
-  }
-
+  // If on login or register:
   if (isAuthPage) {
+    if (isAuthenticated) {
+      return <Navigate to="/" replace />;
+    }
     return (
       <>
         <main className="min-h-screen">
@@ -218,14 +206,23 @@ function AuthenticatedApp() {
     );
   }
 
+  // If unauthenticated, immediately navigate to login page
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  // Authenticated user entering the protected app
   return (
-    <>
-      <Navbar />
-      <main className="min-h-screen">
-        <Outlet />
-      </main>
-      <Footer />
-      <Toaster position="bottom-right" theme="dark" richColors closeButton />
-    </>
+    <UserProvider>
+      <MovieProvider>
+        <Navbar />
+        <main className="min-h-screen">
+          <Outlet />
+        </main>
+        <Footer />
+        <Toaster position="bottom-right" theme="dark" richColors closeButton />
+      </MovieProvider>
+    </UserProvider>
   );
 }
+

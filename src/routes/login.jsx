@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Clapperboard, Lock, Mail } from "lucide-react";
+import { Clapperboard, Lock, Mail, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "../context/AuthContext";
@@ -26,7 +26,7 @@ const inputClass =
   "w-full rounded-xl border border-border bg-surface px-10 py-3 text-sm outline-none focus:border-primary";
 
 function Login() {
-  const { login, isAuthenticated } = useAuth();
+  const { login, loginAsDemo, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState({ email: "", password: "", remember: true });
   const [busy, setBusy] = useState(false);
@@ -37,8 +37,6 @@ function Login() {
       void navigate({ to: "/", replace: true });
     }
   }, [isAuthenticated, navigate]);
-
-
 
   const submit = async (event) => {
     event.preventDefault();
@@ -57,6 +55,17 @@ function Login() {
     }
   };
 
+  const handleDemoLogin = async () => {
+    setBusy(true);
+    try {
+      await loginAsDemo();
+      await navigate({ to: "/", replace: true });
+    } catch (error) {
+      toast.error(error.message || "Could not sign in as demo user.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="relative flex min-h-screen flex-col items-center justify-start px-4 pt-8 pb-12">
@@ -83,7 +92,7 @@ function Login() {
           </span>
           <h1 className="font-display text-2xl font-bold">Welcome back to CineVerse</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Discover your next favorite movie.
+            Sign in to access your recommendations and movie hub.
           </p>
         </div>
 
@@ -114,8 +123,7 @@ function Login() {
               type="password"
               autoComplete="current-password"
               value={form.password}
-              onChange={(event) => setForm({ ...form, password: event.target.value })
-              }
+              onChange={(event) => setForm({ ...form, password: event.target.value })}
               placeholder="••••••••"
               className={inputClass}
             />
@@ -139,6 +147,20 @@ function Login() {
             className="btn-primary w-full rounded-full py-3 text-sm font-semibold disabled:opacity-70"
           >
             {busy ? "Signing in..." : "Sign in"}
+          </button>
+
+          <div className="relative my-2 text-center text-xs text-muted-foreground">
+            <span className="bg-surface/80 px-2 rounded">or explore instantly</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleDemoLogin}
+            disabled={busy}
+            className="btn-glass w-full rounded-full py-3 text-sm font-semibold flex items-center justify-center gap-2 hover:bg-white/10 transition-colors"
+          >
+            <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />
+            Quick Demo Sign-In (1-Click)
           </button>
         </form>
 

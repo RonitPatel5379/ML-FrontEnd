@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate, Navigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { motion } from "framer-motion";
 
@@ -27,11 +27,7 @@ function NotFound() {
   }, [ready, isAuthenticated, navigate]);
 
   if (!isAuthenticated) {
-    return (
-      <div className="grid min-h-screen place-items-center bg-background px-4">
-        <LoadingSpinner label="Redirecting to sign in..." />
-      </div>
-    );
+    return <Navigate to="/login" replace />;
   }
 
   return (
