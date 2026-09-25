@@ -10,6 +10,8 @@ import { HeroSkeleton } from "../components/LoadingSpinner";
 import { useMovies } from "../context/MovieContext";
 import { useUser } from "../context/UserContext";
 import { MOVIES } from "../data/movies";
+import { INDIAN_MOVIES } from "../data/indianMovies";
+import { isIndianMovie } from "../data/genres";
 import { recommendMovies } from "../utils/recommendationEngine";
 import { getRankedTrendingMovies } from "../utils/trending";
 import { seeded } from "../utils/helpers";
@@ -184,10 +186,11 @@ function Home() {
     [movies],
   );
 
-  const topRatedMovies = useMemo(
-    () => [...movies].sort((a, b) => b.rating - a.rating).slice(0, 14),
-    [movies],
-  );
+  const topRatedMovies = useMemo(() => {
+    const indianList = (movies || []).filter(isIndianMovie);
+    const pool = indianList.length >= 10 ? indianList : INDIAN_MOVIES;
+    return [...pool].sort((a, b) => b.rating - a.rating).slice(0, 14);
+  }, [movies]);
 
   const newReleasesMovies = useMemo(
     () => [...movies].sort((a, b) => b.year - a.year).slice(0, 14),
@@ -340,6 +343,7 @@ function Home() {
         />
         <MovieRow
           title="Top Rated"
+          subtitle="Top rated Indian cinema masterpieces"
           movies={topRatedMovies}
           loading={loading && !topRatedMovies.length}
         />

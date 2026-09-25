@@ -142,3 +142,64 @@ export function matchesLanguage(movieLang, targetLanguages) {
   });
 }
 
+export const INDIAN_LANGUAGES = [
+  "Hindi",
+  "Tamil",
+  "Telugu",
+  "Malayalam",
+  "Kannada",
+  "Bengali",
+  "Marathi",
+  "Punjabi",
+  "Gujarati",
+  "Urdu",
+  "Odia",
+  "Assamese",
+];
+
+const INDIAN_LANG_SET = new Set(
+  INDIAN_LANGUAGES.map((l) => l.toLowerCase()),
+);
+
+const INDIAN_LANG_CODES = new Set([
+  "hi",
+  "hin",
+  "ta",
+  "tam",
+  "te",
+  "tel",
+  "ml",
+  "mal",
+  "kn",
+  "kan",
+  "bn",
+  "ben",
+  "mr",
+  "mar",
+  "pa",
+  "pan",
+  "gu",
+  "guj",
+  "ur",
+  "urd",
+]);
+
+/**
+ * Checks whether a movie is an Indian cinema film by region, country, or Indian language.
+ */
+export function isIndianMovie(movie) {
+  if (!movie) return false;
+  if (movie.region && String(movie.region).trim().toLowerCase() === "india") return true;
+  if (movie.country && String(movie.country).trim().toLowerCase() === "india") return true;
+  if (movie.origin_country) {
+    if (Array.isArray(movie.origin_country)) {
+      if (movie.origin_country.some((c) => String(c).trim().toUpperCase() === "IN")) return true;
+    } else if (String(movie.origin_country).trim().toUpperCase() === "IN") {
+      return true;
+    }
+  }
+  if (movie.language && INDIAN_LANG_SET.has(String(movie.language).trim().toLowerCase())) return true;
+  if (movie.original_language && INDIAN_LANG_CODES.has(String(movie.original_language).trim().toLowerCase())) return true;
+  return false;
+}
+
