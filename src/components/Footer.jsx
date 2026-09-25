@@ -29,10 +29,10 @@ const COLUMNS = [
 ];
 
 const SOCIALS = [
-  { Icon: Twitter, label: "Twitter" },
-  { Icon: Instagram, label: "Instagram" },
-  { Icon: Youtube, label: "YouTube" },
-  { Icon: Github, label: "GitHub" },
+  { Icon: Twitter, label: "Twitter", href: "https://twitter.com" },
+  { Icon: Instagram, label: "Instagram", href: "https://instagram.com" },
+  { Icon: Youtube, label: "YouTube", href: "https://youtube.com" },
+  { Icon: Github, label: "GitHub", href: "https://github.com/RonitPatel5379/ML-FrontEnd" },
 ];
 
 export default function Footer() {
@@ -54,12 +54,14 @@ export default function Footer() {
             recommendations worth your evening.
           </p>
           <div className="mt-6 flex gap-2">
-            {SOCIALS.map(({ Icon, label }) => (
+            {SOCIALS.map(({ Icon, label, href }) => (
               <a
                 key={label}
-                href="#"
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
                 aria-label={label}
-                className="btn-glass grid h-10 w-10 place-items-center rounded-full"
+                className="btn-glass grid h-10 w-10 place-items-center rounded-full text-muted-foreground transition-all hover:text-foreground hover:scale-110"
               >
                 <Icon className="h-4 w-4" aria-hidden="true" />
               </a>
