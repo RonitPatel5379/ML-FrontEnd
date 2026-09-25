@@ -240,6 +240,45 @@ function Home() {
     return "Our engine blends genre affinity, ratings, popularity and your recent activity into a single score.";
   }, [preferences]);
 
+  const [highlightTaste, setHighlightTaste] = useState(false);
+
+  // Smooth scroll to "Because your taste says so" section when redirected from preferences
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const checkAndScroll = () => {
+      const hash = window.location.hash;
+      if (
+        hash === "#because-your-taste-says-so" ||
+        hash === "#taste-recommendations" ||
+        hash === "#taste"
+      ) {
+        const target =
+          document.getElementById("because-your-taste-says-so") ||
+          document.getElementById("taste-recommendations") ||
+          document.getElementById("row-Because-your-taste-says-so");
+        if (target) {
+          target.scrollIntoView({ behavior: "smooth", block: "start" });
+          setHighlightTaste(true);
+          setTimeout(() => setHighlightTaste(false), 2600);
+        }
+      }
+    };
+
+    checkAndScroll();
+    const t1 = setTimeout(checkAndScroll, 120);
+    const t2 = setTimeout(checkAndScroll, 400);
+    const t3 = setTimeout(checkAndScroll, 900);
+
+    window.addEventListener("hashchange", checkAndScroll);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+      window.removeEventListener("hashchange", checkAndScroll);
+    };
+  }, []);
+
   if (error) {
     return (
       <div className="px-4 pt-32 pb-16">
@@ -308,6 +347,12 @@ function Home() {
 
         {/* Live Machine Learning recommendations from the Render backend */}
         <MovieRow
+          id={!isFromBackend ? "because-your-taste-says-so" : undefined}
+          className={
+            !isFromBackend && highlightTaste
+              ? "rounded-3xl bg-primary/10 ring-2 ring-primary/40 p-2 shadow-2xl transition-all duration-700"
+              : ""
+          }
           title={
             isFromBackend
               ? `Because you're watching "${sourceMovieTitle}"`
@@ -327,6 +372,12 @@ function Home() {
         {/* Also display general taste profile recommendations when backend ML row is active */}
         {isFromBackend && (
           <MovieRow
+            id="because-your-taste-says-so"
+            className={
+              highlightTaste
+                ? "rounded-3xl bg-primary/10 ring-2 ring-primary/40 p-2 shadow-2xl transition-all duration-700"
+                : ""
+            }
             title="Because your taste says so"
             subtitle={recommendationSubtitle}
             movies={recommendations}

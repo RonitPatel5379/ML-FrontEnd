@@ -68,7 +68,7 @@ function Preferences() {
     if (draft.displayName && draft.displayName !== user?.name && updateProfile) {
       await updateProfile({ name: draft.displayName });
     }
-    navigate({ to: "/profile" });
+    navigate({ to: "/", hash: "because-your-taste-says-so" });
   };
 
   return (

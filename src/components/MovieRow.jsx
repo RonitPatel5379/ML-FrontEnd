@@ -6,6 +6,8 @@ import MovieCard from "./MovieCard";
 import { RowSkeleton } from "./LoadingSpinner";
 
 export default function MovieRow({
+  id,
+  className = "",
   title,
   subtitle,
   movies = [],
@@ -37,7 +39,11 @@ export default function MovieRow({
   if (!movies.length) return null;
 
   return (
-    <section className="py-6" aria-labelledby={`row-${title.replace(/\s+/g, "-")}`}>
+    <section
+      id={id}
+      className={`py-6 transition-colors duration-500 ${id ? "scroll-mt-24 sm:scroll-mt-28" : ""} ${className}`}
+      aria-labelledby={`row-${title.replace(/\s+/g, "-")}`}
+    >
       <header className="mb-4 flex items-end justify-between gap-4 px-4 sm:px-8">
         <div>
           <h2
