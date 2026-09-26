@@ -14,7 +14,13 @@ import { INDIAN_MOVIES } from "../data/indianMovies";
 import { isIndianMovie } from "../data/genres";
 import { recommendMovies } from "../utils/recommendationEngine";
 import { seeded } from "../utils/helpers";
-import { fetchMlRecommendations, fetchIndianHeroMovies } from "../services/mlApi";
+import {
+  fetchMlRecommendations,
+  fetchIndianHeroMovies,
+  isBackendOnline,
+  subscribeBackendStatus,
+  ensureLiveApiConnected,
+} from "../services/mlApi";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -39,6 +45,18 @@ function Home() {
   const { movies, loading, error, reload, backendReady } = useMovies();
   const { favorites, watchlist, recent, watched, preferences } = useUser();
   const [apiIndianMovies, setApiIndianMovies] = useState([]);
+  const [backendStatusOnline, setBackendStatusOnline] = useState(() => isBackendOnline() || backendReady);
+
+  // Guarantee connection to the live Render API is active and monitored
+  useEffect(() => {
+    void ensureLiveApiConnected();
+    const unsub = subscribeBackendStatus(({ online }) => {
+      setBackendStatusOnline(online);
+    });
+    return () => unsub();
+  }, []);
+
+  const isLiveApiConnected = backendStatusOnline || backendReady || isBackendOnline();
 
   // Fetch real Indian movies from the live Render API
   useEffect(() => {
@@ -127,7 +145,8 @@ function Home() {
   const [backendRecommendations, setBackendRecommendations] = useState([]);
   const [sourceMovieTitle, setSourceMovieTitle] = useState("");
 
-  // Determine active movie ID stably (does not change on playback percentage ticks)
+  // Determine active movie ID stably from actual watched / viewed history.
+  // Strictly returns null if user has not watched or viewed any movie yet.
   const activeMovieId = useMemo(() => {
     // 1. Current movie in Continue Watching (in progress, unwatched)
     const inProgress = (recent || []).find(
@@ -141,32 +160,23 @@ function Home() {
       return firstRecent?.id ?? firstRecent;
     }
 
-    // 3. User's top favorite movie
-    if (favorites?.length) {
-      return favorites[0];
+    // 3. User's watched history
+    if (watched?.length) {
+      return watched[0];
     }
 
     return null;
-  }, [recent, watched, favorites]);
+  }, [recent, watched]);
 
-  // Resolve movie title stably for live ML model recommendations
+  // Resolve movie title stably for live ML model recommendations.
+  // If the user has not watched any movie, this remains strictly empty.
   const activeMovieTitle = useMemo(() => {
-    if (!activeMovieId) {
-      // If user hasn't watched anything yet, use their favorite or default seed title ("Inception")
-      // so the live ML API is immediately queried upon login
-      if (favorites?.length) {
-        const favId = favorites[0];
-        const match = movies.find((m) => String(m.id) === String(favId));
-        if (match?.title) return match.title;
-      }
-      const match = movies.find((m) => m.title?.toLowerCase().includes("inception")) || movies[0];
-      return match?.title || "Inception";
-    }
+    if (!activeMovieId) return "";
     const fromLoaded = movies.find((m) => String(m.id) === String(activeMovieId));
     if (fromLoaded?.title) return fromLoaded.title;
     const fromCurated = MOVIES.find((m) => String(m.id) === String(activeMovieId));
-    return fromCurated?.title || "Inception";
-  }, [activeMovieId, favorites, movies]);
+    return fromCurated?.title || "";
+  }, [activeMovieId, movies]);
 
   const lastQueriedTitleRef = useRef("");
   const moviesRef = useRef(movies);
@@ -188,7 +198,7 @@ function Home() {
     lastQueriedTitleRef.current = activeMovieTitle;
     let isSubscribed = true;
 
-    // Quietly query the ML model without triggering constant screen refreshes or skeleton flickers
+    // Quietly query the ML model using the watched movie's title
     fetchMlRecommendations(activeMovieTitle, 14, moviesRef.current)
       .then((recs) => {
         if (isSubscribed) {
@@ -208,14 +218,23 @@ function Home() {
     return () => {
       isSubscribed = false;
     };
-  }, [activeMovieTitle, backendReady, backendRecommendations.length]);
+  }, [activeMovieTitle, backendReady]);
 
-  const isFromBackend = backendRecommendations.length > 0;
+  // Live ML recommendations are only active if backend returned recommendations for a real watched movie
+  const isFromBackend = backendRecommendations.length > 0 && Boolean(sourceMovieTitle);
 
   const popularMovies = useMemo(
-    () => [...movies].sort((a, b) => b.popularity - a.popularity).slice(4, 18),
+    () => [...movies].sort((a, b) => b.popularity - a.popularity).slice(0, 16),
     [movies],
   );
+
+  const hasCustomPreferences = useMemo(() => {
+    const genres = preferences?.genres || [];
+    const languages = preferences?.languages || [];
+    const period = preferences?.period && preferences.period !== "any" ? preferences.period : null;
+    const minRating = Number(preferences?.minRating) || 0;
+    return genres.length > 0 || languages.length > 0 || Boolean(period) || minRating > 0;
+  }, [preferences]);
 
   const recommendationSubtitle = useMemo(() => {
     const genres = preferences?.genres || [];
@@ -234,8 +253,8 @@ function Home() {
     if (period) {
       return `Top recommendations from ${period} and newer`;
     }
-    return recommendations[0]?.reason || "Tuned to your taste profile";
-  }, [preferences, recommendations]);
+    return "Curated cinematic gems based on global ratings and popularity";
+  }, [preferences]);
 
   const recommendationDescription = useMemo(() => {
     const genres = preferences?.genres || [];
@@ -300,7 +319,11 @@ function Home() {
     <div>
       {loading && !featured.length ? <HeroSkeleton /> : <Hero movies={featured} />}
 
-      <div className="relative z-10 -mt-10 space-y-2 pb-10">
+      <div
+        className={`relative z-10 space-y-6 pb-12 ${
+          continueWatching.length > 0 ? "-mt-8" : "pt-4 sm:pt-6"
+        }`}
+      >
         {continueWatching.length > 0 && (
           <MovieRow
             title="Continue Watching"
@@ -317,81 +340,79 @@ function Home() {
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="inline-flex items-center gap-2 text-[11px] font-semibold tracking-[0.24em] text-primary-glow uppercase">
                     <Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-                    {isFromBackend ? "Render ML Backend Active" : "Recommended For You"}
+                    {isFromBackend ? "Render ML Backend Active" : "Personalized For You"}
                   </p>
-                  {(isFromBackend || backendReady) && (
-                    <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-400 border border-emerald-500/20">
+                  {isLiveApiConnected && (
+                    <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-400 border border-emerald-500/20 shadow-sm shadow-emerald-500/10">
+                      <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
                       Live API Connected
                     </span>
                   )}
                 </div>
                 <h2 className="mt-2 font-display text-2xl font-bold sm:text-3xl">
                   {isFromBackend
-                    ? (activeMovieId ? `Top Picks Based on "${sourceMovieTitle}"` : `Top Live ML Picks Based on "${sourceMovieTitle}"`)
-                    : recommendationSubtitle}
+                    ? (continueWatching.length > 0
+                        ? `Top Picks Based on "${sourceMovieTitle}"`
+                        : `Top Live ML Picks Based on "${sourceMovieTitle}"`)
+                    : (hasCustomPreferences
+                        ? recommendationSubtitle
+                        : "Handpicked For You · Discover Your Taste")}
                 </h2>
                 <p className="mt-2 max-w-xl text-sm text-muted-foreground">
                   {isFromBackend
                     ? `Predicted in real-time by the Python FastAPI backend on Render using TF-IDF vectorization and KMeans clusters closest to "${sourceMovieTitle}".`
-                    : recommendationDescription}
+                    : (hasCustomPreferences
+                        ? recommendationDescription
+                        : "Welcome to CineVerse! Set your favorite genres and languages in preferences, or start watching any movie to unlock real-time ML recommendations.")}
                 </p>
               </div>
               <Link
                 to="/preferences"
-                className="btn-primary shrink-0 rounded-full px-6 py-3 text-center text-sm font-semibold"
+                className="btn-primary shrink-0 rounded-full px-6 py-3 text-center text-sm font-semibold transition-transform hover:scale-105"
               >
-                Tune recommendations
+                {hasCustomPreferences ? "Tune recommendations" : "Set your taste preferences"}
               </Link>
             </div>
           </div>
         </section>
 
-        {/* Live Machine Learning recommendations from the Render backend */}
-        <MovieRow
-          id={!isFromBackend ? "because-your-taste-says-so" : undefined}
-          className={
-            !isFromBackend && highlightTaste
-              ? "rounded-3xl bg-primary/10 ring-2 ring-primary/40 p-2 shadow-2xl transition-all duration-700"
-              : ""
-          }
-          title={
-            isFromBackend
-              ? (activeMovieId ? `Because you're watching "${sourceMovieTitle}"` : `Recommended By Live ML Model ("${sourceMovieTitle}")`)
-              : "Because your taste says so"
-          }
-          subtitle={
-            isFromBackend
-              ? `Real-time ML predictions from https://ml-backend-8unk.onrender.com`
-              : recommendationSubtitle
-          }
-          movies={isFromBackend ? backendRecommendations : recommendations}
-          loading={loading && !backendRecommendations.length && !recommendations.length}
-          showReason
-          seeAllTo="/discover"
-        />
-
-        {/* Also display general taste profile recommendations when backend ML row is active */}
+        {/* Live Machine Learning recommendations: ONLY displayed if user has watched a movie and predictions exist */}
         {isFromBackend && (
           <MovieRow
-            id="because-your-taste-says-so"
-            className={
-              highlightTaste
-                ? "rounded-3xl bg-primary/10 ring-2 ring-primary/40 p-2 shadow-2xl transition-all duration-700"
-                : ""
+            title={
+              continueWatching.length > 0
+                ? `Because you're watching "${sourceMovieTitle}"`
+                : `Recommended By Live ML Model ("${sourceMovieTitle}")`
             }
-            title="Because your taste says so"
-            subtitle={recommendationSubtitle}
-            movies={recommendations}
-            loading={loading && !recommendations.length}
+            subtitle="Real-time ML predictions from https://ml-backend-8unk.onrender.com"
+            movies={backendRecommendations}
+            loading={loading && !backendRecommendations.length}
             showReason
             seeAllTo="/discover"
           />
         )}
 
+        {/* General taste profile recommendations */}
+        <MovieRow
+          id="because-your-taste-says-so"
+          className={
+            highlightTaste
+              ? "rounded-3xl bg-primary/10 ring-2 ring-primary/40 p-2 shadow-2xl transition-all duration-700"
+              : ""
+          }
+          title="Because your taste says so"
+          subtitle={recommendationSubtitle}
+          movies={recommendations}
+          loading={loading && !recommendations.length}
+          showReason
+          seeAllTo="/discover"
+        />
+
         <MovieRow
           title="Popular Movies"
           movies={popularMovies}
           loading={loading && !popularMovies.length}
+          seeAllTo="/discover"
         />
       </div>
     </div>
