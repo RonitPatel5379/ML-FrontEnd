@@ -9,6 +9,9 @@ import { ensureLiveApiConnected } from "../services/mlApi";
 import backdrop from "../assets/backdrop-neon.jpg";
 
 export const Route = createFileRoute("/login")({
+  validateSearch: (search) => ({
+    email: typeof search?.email === "string" ? search.email : "",
+  }),
   head: () => ({
     meta: [
       { title: "Sign in — CineVerse" },
@@ -29,8 +32,19 @@ const inputClass =
 function Login() {
   const { login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
-  const [form, setForm] = useState({ email: "", password: "", remember: false });
+  const search = Route.useSearch();
+  const [form, setForm] = useState(() => ({
+    email: search?.email || "",
+    password: "",
+    remember: false,
+  }));
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (search?.email && !form.email) {
+      setForm((prev) => ({ ...prev, email: search.email }));
+    }
+  }, [search?.email, form.email]);
 
   useEffect(() => {
     // Proactively pre-warm live ML backend container while user is on login page

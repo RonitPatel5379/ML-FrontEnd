@@ -98,6 +98,7 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => getStoredUser());
   const [ready, setReady] = useState(() => typeof window !== "undefined");
   const profileRequest = useRef(0);
+  const isRegisteringRef = useRef(false);
 
   const applyUser = useCallback((authUser) => {
     const requestId = ++profileRequest.current;
@@ -134,6 +135,10 @@ export function AuthProvider({ children }) {
       });
 
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      // If user is currently in the sign-up flow, do not auto-login
+      if (isRegisteringRef.current && (event === "SIGNED_IN" || event === "USER_UPDATED")) {
+        return;
+      }
       if (["INITIAL_SESSION", "SIGNED_IN", "SIGNED_OUT", "USER_UPDATED", "TOKEN_REFRESHED"].includes(event)) {
         applyUser(session?.user || null);
       }
@@ -146,33 +151,40 @@ export function AuthProvider({ children }) {
   }, [applyUser]);
 
   const register = useCallback(async ({ name, email, password }) => {
-    const { data, error } = await withTimeout(
-      supabase.auth.signUp({
-        email: String(email).trim().toLowerCase(),
-        password,
-        options: {
-          emailRedirectTo: window.location.origin,
-          data: { display_name: name },
-        },
-      }),
-      "Account creation is taking too long. Please try again.",
-    );
-    if (error) throw error;
+    isRegisteringRef.current = true;
+    try {
+      const cleanEmail = String(email).trim().toLowerCase();
+      const { data, error } = await withTimeout(
+        supabase.auth.signUp({
+          email: cleanEmail,
+          password,
+          options: {
+            emailRedirectTo: window.location.origin,
+            data: { display_name: name },
+          },
+        }),
+        "Account creation is taking too long. Please try again.",
+      );
+      if (error) throw error;
 
-    // If session or user is returned, keep user logged in immediately
-    if (data.session?.user || data.user) {
-      applyUser(data.session?.user || data.user);
-      syncCookie(true);
-      toast.success("Account created!", {
-        description: `Welcome to CineVerse, ${name || "Cinephile"}!`,
+      // Ensure user is NOT automatically signed in. They must log in on the login page.
+      try {
+        await supabase.auth.signOut();
+      } catch (err) {
+        console.warn("[Auth] Post-register signout error:", err);
+      }
+      applyUser(null);
+      syncCookie(false);
+
+      toast.success("Account created successfully!", {
+        description: "Please sign in with your email and password to enter CineVerse.",
       });
-      return data;
+      return { ...data, email: cleanEmail };
+    } finally {
+      setTimeout(() => {
+        isRegisteringRef.current = false;
+      }, 500);
     }
-
-    toast.success("Account created", {
-      description: "Your account is ready. Sign in to continue.",
-    });
-    return data;
   }, [applyUser]);
 
   const login = useCallback(async ({ email, password }) => {

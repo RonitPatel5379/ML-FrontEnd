@@ -48,10 +48,12 @@ function Register() {
     setBusy(true);
     try {
       const data = await register({ name: form.name.trim(), email: form.email, password: form.password });
-      if (data?.session || data?.user) {
-        return navigate({ to: "/", replace: true });
-      }
-      return navigate({ to: "/login", replace: true });
+      const targetEmail = data?.email || form.email.trim();
+      return navigate({
+        to: "/login",
+        search: { email: targetEmail },
+        replace: true,
+      });
     } catch (error) {
       toast.error(error.message || "Could not create your account.");
       return undefined;
